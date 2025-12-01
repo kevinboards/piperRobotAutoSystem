@@ -140,23 +140,27 @@ class PiperPlayer:
         if self._is_playing:
             raise RuntimeError("Playback already in progress")
         
-        # Verify robot is enabled
+        # Verify robot is enabled and prepare for playback
         try:
+            # Enable the robot (critical!)
+            self.logger.info("Enabling robot...")
+            enable_attempts = 0
+            max_attempts = 100
+            while not self.piper.EnablePiper():
+                time.sleep(0.01)
+                enable_attempts += 1
+                if enable_attempts >= max_attempts:
+                    raise RuntimeError("Failed to enable robot after 100 attempts")
+            
+            self.logger.info("Robot enabled successfully")
+            time.sleep(0.1)
+            
             # Initialize gripper if requested
             if init_gripper:
                 self._init_gripper()
             
-            # Set robot to joint control mode
-            self.piper.MotionCtrl_2(
-                ctrl_mode=0x01,  # CAN control
-                move_mode=0x01,  # MOVE J (joint mode)
-                move_spd_rate_ctrl=50,  # 50% speed
-                is_mit_mode=0x00  # Normal mode
-            )
-            time.sleep(0.1)  # Allow mode to settle
-            
         except Exception as e:
-            self.logger.error(f"Failed to set robot mode: {e}")
+            self.logger.error(f"Failed to prepare robot: {e}")
             raise RuntimeError("Failed to prepare robot for playback. Is it connected and enabled?")
         
         self._speed_multiplier = speed_multiplier
@@ -277,6 +281,14 @@ class PiperPlayer:
             data_point: Dictionary with cartesian, joints, and gripper data
         """
         try:
+            # CRITICAL: Set motion control mode before EVERY command (as shown in demo)
+            self.piper.MotionCtrl_2(
+                ctrl_mode=0x01,  # CAN control
+                move_mode=0x01,  # MOVE J (joint mode)
+                move_spd_rate_ctrl=100,  # 100% speed for accurate playback
+                is_mit_mode=0x00  # Normal mode
+            )
+            
             # Extract joint angles
             joints = data_point['joints']
             

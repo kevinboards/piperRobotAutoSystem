@@ -94,7 +94,7 @@ class PiperRecorder:
             self.logger.warning(f"Gripper initialization failed (may not be critical): {e}")
         
     def start_recording(self, filename: Optional[str] = None, description: str = "", 
-                       init_gripper: bool = True) -> str:
+                       init_gripper: bool = True, enable_robot: bool = True) -> str:
         """
         Start recording robot movements.
         
@@ -103,6 +103,7 @@ class PiperRecorder:
                      If None, generates timestamp-based filename.
             description: Optional description to include in file header
             init_gripper: If True, initializes gripper (clear errors and enable)
+            enable_robot: If True, enables the robot before recording (recommended)
         
         Returns:
             Full path to the recording file
@@ -112,6 +113,23 @@ class PiperRecorder:
         """
         if self._is_recording:
             raise RuntimeError("Already recording. Stop current recording first.")
+        
+        # Enable robot if requested (critical for robot responsiveness)
+        if enable_robot:
+            self.logger.info("Enabling robot...")
+            try:
+                enable_attempts = 0
+                max_attempts = 100
+                while not self.piper.EnablePiper():
+                    time.sleep(0.01)
+                    enable_attempts += 1
+                    if enable_attempts >= max_attempts:
+                        raise RuntimeError("Failed to enable robot after 100 attempts")
+                self.logger.info("Robot enabled successfully")
+                time.sleep(0.1)
+            except Exception as e:
+                self.logger.error(f"Failed to enable robot: {e}")
+                raise
         
         # Initialize gripper if requested
         if init_gripper:
