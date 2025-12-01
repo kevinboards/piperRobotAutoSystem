@@ -70,8 +70,31 @@ class PiperRecorder:
         
         # Logging
         self.logger = logging.getLogger(__name__)
+    
+    def _init_gripper(self):
+        """
+        Initialize gripper: clear errors and enable.
+        Should be called at the start of each recording session.
+        """
+        try:
+            import time
+            self.logger.info("Initializing gripper...")
+            
+            # Clear errors and disable
+            self.piper.GripperCtrl(0, 1000, 0x02, 0)
+            time.sleep(0.1)
+            
+            # Enable gripper
+            self.piper.GripperCtrl(0, 1000, 0x01, 0)
+            time.sleep(0.1)
+            
+            self.logger.info("Gripper initialized successfully")
+            
+        except Exception as e:
+            self.logger.warning(f"Gripper initialization failed (may not be critical): {e}")
         
-    def start_recording(self, filename: Optional[str] = None, description: str = "") -> str:
+    def start_recording(self, filename: Optional[str] = None, description: str = "", 
+                       init_gripper: bool = True) -> str:
         """
         Start recording robot movements.
         
@@ -79,6 +102,7 @@ class PiperRecorder:
             filename: Optional custom filename (without extension). 
                      If None, generates timestamp-based filename.
             description: Optional description to include in file header
+            init_gripper: If True, initializes gripper (clear errors and enable)
         
         Returns:
             Full path to the recording file
@@ -88,6 +112,10 @@ class PiperRecorder:
         """
         if self._is_recording:
             raise RuntimeError("Already recording. Stop current recording first.")
+        
+        # Initialize gripper if requested
+        if init_gripper:
+            self._init_gripper()
         
         # Ensure recordings directory exists
         ensure_recordings_directory()
@@ -256,9 +284,17 @@ class PiperRecorder:
             
             # Read gripper state
             gripper_data = self.piper.GetArmGripperMsgs()
+            
+            # Convert gripper values to standard units and ensure valid ranges
+            gripper_position = gripper_data.gripper_state.grippers_angle * 0.001  # Convert to mm
+            gripper_effort_raw = gripper_data.gripper_state.grippers_effort * 0.001  # Convert to N·m
+            
+            # Ensure gripper effort is positive (SDK may return negative values)
+            gripper_effort = abs(gripper_effort_raw)
+            
             gripper = {
-                'position': gripper_data.gripper_state.grippers_angle * 0.001,  # Convert to mm
-                'effort': gripper_data.gripper_state.grippers_effort * 0.001,   # Convert to N·m
+                'position': gripper_position,
+                'effort': gripper_effort,
                 'code': 1  # Assume enabled if reading successfully
             }
             

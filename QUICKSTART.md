@@ -39,6 +39,21 @@ PiperAutomationSystem/
 
 ## Quick Start
 
+### First-Time Setup (Important!)
+
+**If this is your first time using the gripper**, run the setup script once:
+
+```bash
+python setup_gripper_first_time.py
+```
+
+This configures the gripper parameters. You only need to do this:
+- Once per robot
+- After replacing the gripper
+- After factory reset
+
+---
+
 ### Method 1: GUI Application (Recommended)
 
 1. **Launch the application:**
@@ -212,6 +227,11 @@ t1701453045128 x150.528 y-50.342 z180.005 a-179.900 b0.000 c-179.900 J6[0.000,45
 - Verify robot is enabled
 - Ensure robot starts from similar position as recording
 - Check for joint limit warnings in logs
+
+### "Gripper effort out of range" errors:
+- **Fixed in latest version!** The system now handles negative gripper values automatically
+- If using older recordings, the system will clamp values to valid range (0-5000)
+- No action needed - system handles this internally
 
 ### GUI not responding:
 - Recording and playback run in separate threads

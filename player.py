@@ -65,6 +65,28 @@ class PiperPlayer:
         # Logging
         self.logger = logging.getLogger(__name__)
     
+    def _init_gripper(self):
+        """
+        Initialize gripper: clear errors and enable.
+        Should be called before playback to ensure gripper responds properly.
+        """
+        try:
+            import time
+            self.logger.info("Initializing gripper...")
+            
+            # Clear errors and disable
+            self.piper.GripperCtrl(0, 1000, 0x02, 0)
+            time.sleep(0.1)
+            
+            # Enable gripper
+            self.piper.GripperCtrl(0, 1000, 0x01, 0)
+            time.sleep(0.1)
+            
+            self.logger.info("Gripper initialized successfully")
+            
+        except Exception as e:
+            self.logger.warning(f"Gripper initialization failed (may not be critical): {e}")
+    
     def load_recording(self, filepath: str) -> Dict[str, Any]:
         """
         Load a PPR recording file into memory.
@@ -100,12 +122,14 @@ class PiperPlayer:
             self.logger.error(f"Failed to load recording: {e}")
             raise
     
-    def start_playback(self, speed_multiplier: float = DEFAULT_SPEED_MULTIPLIER) -> None:
+    def start_playback(self, speed_multiplier: float = DEFAULT_SPEED_MULTIPLIER, 
+                      init_gripper: bool = True) -> None:
         """
         Start playing back the loaded recording.
         
         Args:
             speed_multiplier: Playback speed multiplier (0.5 = half speed, 2.0 = double speed)
+            init_gripper: If True, initializes gripper before playback (recommended)
             
         Raises:
             RuntimeError: If no recording is loaded or already playing
@@ -118,6 +142,10 @@ class PiperPlayer:
         
         # Verify robot is enabled
         try:
+            # Initialize gripper if requested
+            if init_gripper:
+                self._init_gripper()
+            
             # Set robot to joint control mode
             self.piper.MotionCtrl_2(
                 ctrl_mode=0x01,  # CAN control
@@ -268,6 +296,9 @@ class PiperPlayer:
             gripper_pos = int(gripper['position'] * 1000)  # Convert mm to 0.001mm
             gripper_effort = int(gripper['effort'] * 1000)  # Convert N·m to 0.001 N·m
             gripper_code = int(gripper['code'])
+            
+            # Clamp gripper effort to valid range (0-5000)
+            gripper_effort = max(0, min(abs(gripper_effort), 5000))
             
             # Send gripper command
             self.piper.GripperCtrl(
