@@ -219,7 +219,7 @@ class PiperPlayer:
     def _playback_loop(self):
         """
         Main playback loop - runs in separate thread.
-        Sends recorded positions to robot with accurate timing.
+        Sends recorded positions to robot at fixed rate (like the demos).
         """
         self.logger.info("Playback loop started")
         
@@ -227,11 +227,12 @@ class PiperPlayer:
             self.logger.error("No data to play back")
             return
         
-        # Get timestamps from recording
-        start_timestamp = self._data_list[0]['timestamp']
+        # Use fixed rate like demos (0.005 seconds = 200 Hz)
+        # Adjust by speed multiplier
+        base_interval = 0.005  # 5ms between commands (like demo)
+        interval = base_interval / self._speed_multiplier
         
-        # Start playback timer
-        playback_start_time = time.time()
+        self.logger.info(f"Playback interval: {interval*1000:.2f}ms ({1/interval:.1f} Hz)")
         
         try:
             for i, data_point in enumerate(self._data_list):
@@ -248,21 +249,11 @@ class PiperPlayer:
                 
                 self._current_index = i
                 
-                # Calculate when this point should be played
-                recorded_time_offset = (data_point['timestamp'] - start_timestamp) / 1000.0  # Convert to seconds
-                target_playback_time = playback_start_time + (recorded_time_offset / self._speed_multiplier)
-                
-                # Wait until it's time to play this point
-                current_time = time.time()
-                wait_time = target_playback_time - current_time
-                
-                if wait_time > 0:
-                    time.sleep(wait_time)
-                elif wait_time < -0.1:  # If we're more than 100ms behind, log warning
-                    self.logger.warning(f"Playback running behind schedule by {-wait_time:.3f}s")
-                
                 # Send position command to robot
                 self._send_position(data_point)
+                
+                # Fixed delay between commands (like the demo)
+                time.sleep(interval)
             
             self.logger.info("Playback completed successfully")
             
@@ -299,6 +290,10 @@ class PiperPlayer:
             j4 = int(joints[3] * 1000)
             j5 = int(joints[4] * 1000)
             j6 = int(joints[5] * 1000)
+            
+            # Debug: Log first few commands to verify values
+            if self._current_index < 5:
+                self.logger.info(f"Sending position #{self._current_index}: J1={j1/1000:.2f}° J2={j2/1000:.2f}° J3={j3/1000:.2f}°")
             
             # Send joint control command
             self.piper.JointCtrl(j1, j2, j3, j4, j5, j6)

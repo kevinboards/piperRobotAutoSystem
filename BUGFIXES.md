@@ -145,11 +145,24 @@ Two critical issues found by reviewing demo scripts:
 
 3. **Added Robot Enable in `start_recording()` as well** for consistency
 
+### Additional Fix (Dec 1, 2025 - Part 2):
+**Issue:** Robot still not moving, "running behind schedule" warnings
+
+**Root Cause:** Timestamp-based timing was too complex and slow. The robot couldn't keep up with the timing calculations.
+
+**Solution:** Simplified to fixed-rate playback like the demos:
+```python
+# Simple fixed delay (5ms = 200 Hz)
+interval = 0.005 / speed_multiplier
+time.sleep(interval)
+```
+
 ### Testing:
 - ✅ Robot now enables properly before playback
 - ✅ Each position command now preceded by mode setting
-- ✅ Robot moves accurately during playback
-- ✅ No performance impact (mode setting is fast)
+- ✅ Simplified timing (fixed rate vs timestamp-based)
+- ✅ Added debug logging for first 5 commands
+- ✅ No "running behind schedule" warnings
 
 ### Impact:
 - **Breaking Change:** No - all changes are improvements
