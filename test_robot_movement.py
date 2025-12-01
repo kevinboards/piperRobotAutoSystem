@@ -90,12 +90,15 @@ def test_basic_movement():
         
         # Position 1: Current position (no movement yet)
         logger.info("Position 1: Current position (holding)")
-        for _ in range(10):
+        for i in range(10):
             piper.MotionCtrl_2(0x01, 0x01, 30, 0x00)  # 30% speed
             piper.JointCtrl(current_j1, current_j2, current_j3, 0, 0, 0)
             piper.GripperCtrl(0, 1000, 0x01, 0)
-            status = piper.GetArmStatus()
-            logger.info(f"  Status: ctrl_mode={status.arm_status.ctrl_mode:02x} arm_status={status.arm_status.arm_status:02x}")
+            
+            if i == 0:  # Log status only once
+                status = piper.GetArmStatus()
+                logger.info(f"  Status: ctrl_mode={status.arm_status.ctrl_mode} arm_status={status.arm_status.arm_status}")
+            
             time.sleep(0.1)
         
         # Position 2: Move J1 by 5 degrees
