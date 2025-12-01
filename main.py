@@ -5,10 +5,29 @@ Async GUI for recording and playing back robot movements
 
 import asyncio
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
-import json
+import logging
 from typing import Optional
+
+# Import Piper SDK
+try:
+    from piper_sdk import C_PiperInterface_V2
+    SDK_AVAILABLE = True
+except ImportError:
+    SDK_AVAILABLE = False
+    print("Warning: Piper SDK not available. Running in demo mode.")
+
+# Import our modules
+from recorder import PiperRecorder
+from player import PiperPlayer
+from ppr_file_handler import list_recordings, get_recording_info
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 
 class PiperAutomationUI:
@@ -26,18 +45,48 @@ class PiperAutomationUI:
         """
         self.root = root
         self.root.title("Piper Robot Automation System")
-        self.root.geometry("600x400")
+        self.root.geometry("700x500")
         self.root.resizable(True, True)
+        
+        # Initialize Piper SDK
+        self.piper = None
+        self.recorder: Optional[PiperRecorder] = None
+        self.player: Optional[PiperPlayer] = None
+        self.logger = logging.getLogger(__name__)
         
         # State variables
         self.is_recording = False
         self.is_playing = False
         self.loaded_file_path: Optional[Path] = None
         self.file_duration: float = 0.0
-        self.loaded_data: Optional[list] = None
+        
+        # Try to connect to robot
+        self._init_robot_connection()
         
         # Setup UI
         self._setup_ui()
+        
+        # Start status update loop
+        self.root.after(100, self._update_status_loop)
+    
+    def _init_robot_connection(self):
+        """
+        Initialize connection to Piper robot.
+        """
+        if not SDK_AVAILABLE:
+            self.logger.warning("Piper SDK not available - running in demo mode")
+            return
+        
+        try:
+            self.piper = C_PiperInterface_V2()
+            self.piper.ConnectPort()
+            self.logger.info("Connected to Piper robot")
+        except Exception as e:
+            self.logger.error(f"Failed to connect to robot: {e}")
+            messagebox.showwarning(
+                "Robot Connection",
+                f"Could not connect to Piper robot.\n\nError: {e}\n\nThe application will run in demo mode."
+            )
         
     def _setup_ui(self):
         """
@@ -126,9 +175,73 @@ class PiperAutomationUI:
         )
         duration_label.grid(row=1, column=1, sticky="w", padx=(10, 0), pady=5)
         
+        # Samples label
+        ttk.Label(info_frame, text="Samples:").grid(row=2, column=0, sticky="w", pady=5)
+        self.samples_var = tk.StringVar(value="--")
+        samples_label = ttk.Label(
+            info_frame,
+            textvariable=self.samples_var,
+            font=("Segoe UI", 10),
+            foreground="#555555"
+        )
+        samples_label.grid(row=2, column=1, sticky="w", padx=(10, 0), pady=5)
+        
+        # Progress bar
+        progress_frame = ttk.LabelFrame(main_frame, text="Progress", padding="10")
+        progress_frame.grid(row=3, column=0, pady=20, sticky="ew")
+        
+        self.progress_var = tk.DoubleVar(value=0.0)
+        self.progress_bar = ttk.Progressbar(
+            progress_frame,
+            variable=self.progress_var,
+            maximum=100.0,
+            mode='determinate',
+            length=400
+        )
+        self.progress_bar.pack(fill='x', pady=5)
+        
+        self.progress_label_var = tk.StringVar(value="0.0%")
+        progress_label = ttk.Label(
+            progress_frame,
+            textvariable=self.progress_label_var,
+            font=("Segoe UI", 9)
+        )
+        progress_label.pack()
+        
+        # Playback speed control
+        speed_frame = ttk.LabelFrame(main_frame, text="Playback Speed", padding="10")
+        speed_frame.grid(row=4, column=0, pady=10, sticky="ew")
+        
+        speed_control_frame = ttk.Frame(speed_frame)
+        speed_control_frame.pack(fill='x')
+        
+        ttk.Label(speed_control_frame, text="0.5x").pack(side='left', padx=5)
+        
+        self.speed_var = tk.DoubleVar(value=1.0)
+        self.speed_slider = ttk.Scale(
+            speed_control_frame,
+            from_=0.5,
+            to=2.0,
+            variable=self.speed_var,
+            orient='horizontal',
+            command=self._on_speed_change
+        )
+        self.speed_slider.pack(side='left', fill='x', expand=True, padx=5)
+        
+        ttk.Label(speed_control_frame, text="2.0x").pack(side='left', padx=5)
+        
+        self.speed_label_var = tk.StringVar(value="1.0x")
+        speed_value_label = ttk.Label(
+            speed_control_frame,
+            textvariable=self.speed_label_var,
+            font=("Segoe UI", 10, "bold"),
+            width=6
+        )
+        speed_value_label.pack(side='left', padx=10)
+        
         # Status bar
         status_frame = ttk.Frame(main_frame)
-        status_frame.grid(row=3, column=0, pady=(20, 0), sticky="ew")
+        status_frame.grid(row=5, column=0, pady=(20, 0), sticky="ew")
         
         self.status_var = tk.StringVar(value="Ready")
         status_label = ttk.Label(
@@ -145,50 +258,114 @@ class PiperAutomationUI:
         Toggles between recording and stopped states.
         """
         if not self.is_recording:
-            # Start recording
-            self.is_recording = True
-            self.record_button.configure(text="Stop")
-            self.load_button.configure(state="disabled")
-            self.play_button.configure(state="disabled")
-            self.status_var.set("Recording...")
+            # Check if robot is connected
+            if not self.piper:
+                messagebox.showerror("Error", "Robot not connected. Cannot start recording.")
+                return
             
-            # Schedule async recording task
-            asyncio.create_task(self._record_async())
+            # Start recording
+            try:
+                self.recorder = PiperRecorder(self.piper, sample_rate=200)
+                filepath = self.recorder.start_recording(description="Manual recording")
+                
+                self.is_recording = True
+                self.record_button.configure(text="Stop Recording")
+                self.load_button.configure(state="disabled")
+                self.play_button.configure(state="disabled")
+                self.status_var.set(f"Recording to: {Path(filepath).name}")
+                
+            except Exception as e:
+                self.logger.error(f"Failed to start recording: {e}")
+                messagebox.showerror("Recording Error", f"Failed to start recording:\n{e}")
+                
         else:
             # Stop recording
-            self.is_recording = False
-            self.record_button.configure(text="Record")
-            self.load_button.configure(state="normal")
-            if self.loaded_file_path:
-                self.play_button.configure(state="normal")
-            self.status_var.set("Recording stopped")
+            try:
+                if self.recorder:
+                    stats = self.recorder.stop_recording()
+                    self.is_recording = False
+                    self.record_button.configure(text="Record")
+                    self.load_button.configure(state="normal")
+                    
+                    # Auto-load the recorded file
+                    if stats.get('filepath'):
+                        self.loaded_file_path = Path(stats['filepath'])
+                        self._update_file_info()
+                        self.play_button.configure(state="normal")
+                    
+                    messagebox.showinfo(
+                        "Recording Complete",
+                        f"Recording saved successfully!\n\n"
+                        f"File: {stats.get('filename', 'Unknown')}\n"
+                        f"Samples: {stats.get('sample_count', 0)}\n"
+                        f"Duration: {stats.get('duration_sec', 0):.2f} seconds\n"
+                        f"Average Rate: {stats.get('average_rate', 0):.1f} Hz"
+                    )
+                    
+            except Exception as e:
+                self.logger.error(f"Error stopping recording: {e}")
+                messagebox.showerror("Error", f"Error stopping recording:\n{e}")
+            
+            finally:
+                self.is_recording = False
+                self.record_button.configure(text="Record")
+                self.load_button.configure(state="normal")
+                self.status_var.set("Recording stopped")
     
     def _on_play_click(self):
         """
-        Handle Play/Pause button click.
-        Toggles between playing and paused states.
+        Handle Play/Stop button click.
+        Toggles between playing and stopped states.
         """
         if not self.is_playing:
-            # Start playback
-            if not self.loaded_data:
-                self.status_var.set("Error: No valid data to play")
+            # Check if robot is connected
+            if not self.piper:
+                messagebox.showerror("Error", "Robot not connected. Cannot start playback.")
                 return
-                
-            self.is_playing = True
-            self.play_button.configure(text="Pause")
-            self.record_button.configure(state="disabled")
-            self.load_button.configure(state="disabled")
-            self.status_var.set("Playing...")
             
-            # Schedule async playback task
-            asyncio.create_task(self._playback_async())
+            # Check if file is loaded
+            if not self.loaded_file_path:
+                messagebox.showwarning("No File", "Please load a recording file first.")
+                return
+            
+            # Start playback
+            try:
+                if not self.player:
+                    self.player = PiperPlayer(self.piper)
+                    self.player.load_recording(str(self.loaded_file_path))
+                
+                speed = self.speed_var.get()
+                self.player.start_playback(speed_multiplier=speed)
+                
+                self.is_playing = True
+                self.play_button.configure(text="Stop Playback")
+                self.record_button.configure(state="disabled")
+                self.load_button.configure(state="disabled")
+                self.speed_slider.configure(state="disabled")
+                self.status_var.set(f"Playing: {self.loaded_file_path.name}")
+                
+            except Exception as e:
+                self.logger.error(f"Failed to start playback: {e}")
+                messagebox.showerror("Playback Error", f"Failed to start playback:\n{e}")
+                
         else:
-            # Pause playback
-            self.is_playing = False
-            self.play_button.configure(text="Play")
-            self.record_button.configure(state="normal")
-            self.load_button.configure(state="normal")
-            self.status_var.set("Playback paused")
+            # Stop playback
+            try:
+                if self.player:
+                    self.player.stop_playback()
+                    
+            except Exception as e:
+                self.logger.error(f"Error stopping playback: {e}")
+            
+            finally:
+                self.is_playing = False
+                self.play_button.configure(text="Play")
+                self.record_button.configure(state="normal")
+                self.load_button.configure(state="normal")
+                self.speed_slider.configure(state="normal")
+                self.progress_var.set(0.0)
+                self.progress_label_var.set("0.0%")
+                self.status_var.set("Playback stopped")
     
     def _on_load_click(self):
         """
@@ -196,86 +373,94 @@ class PiperAutomationUI:
         Opens file dialog and loads the selected file.
         """
         # Open file dialog
+        recordings_dir = Path("recordings")
+        initial_dir = recordings_dir if recordings_dir.exists() else Path.cwd()
+        
         file_path = filedialog.askopenfilename(
             title="Select Recording File",
             filetypes=[
-                ("JSON files", "*.json"),
+                ("Piper Recordings", "*.ppr"),
                 ("All files", "*.*")
             ],
-            initialdir=Path.cwd()
+            initialdir=initial_dir
         )
         
         if file_path:
-            self.loaded_file_path = Path(file_path)
-            self._update_file_info()
-            
-            # Schedule async file processing
-            asyncio.create_task(self._process_file_async())
+            try:
+                self.loaded_file_path = Path(file_path)
+                
+                # Create new player and load file
+                if self.piper:
+                    self.player = PiperPlayer(self.piper)
+                    info = self.player.load_recording(str(file_path))
+                    
+                    # Update UI with file info
+                    self._update_file_info()
+                    self.play_button.configure(state="normal")
+                    self.status_var.set(f"Loaded: {self.loaded_file_path.name}")
+                else:
+                    messagebox.showwarning(
+                        "Robot Not Connected",
+                        "Robot is not connected. File loaded but playback will not be available."
+                    )
+                    self._update_file_info()
+                    
+            except Exception as e:
+                self.logger.error(f"Failed to load file: {e}")
+                messagebox.showerror("Load Error", f"Failed to load recording file:\n{e}")
+                self.loaded_file_path = None
+                self.player = None
     
     def _update_file_info(self):
         """
         Update the UI with information about the loaded file.
         """
-        if self.loaded_file_path:
-            # Display filename
-            self.filename_var.set(self.loaded_file_path.name)
-            
-            # Calculate and display duration (placeholder for now)
-            self._calculate_duration()
-            
-            self.status_var.set(f"Loaded: {self.loaded_file_path.name}")
+        if self.loaded_file_path and self.loaded_file_path.exists():
+            try:
+                # Display filename
+                self.filename_var.set(self.loaded_file_path.name)
+                
+                # Get recording info
+                info = get_recording_info(str(self.loaded_file_path))
+                
+                if 'error' not in info:
+                    # Display duration
+                    duration_sec = info['duration_sec']
+                    self._format_duration(duration_sec)
+                    
+                    # Display sample count
+                    self.samples_var.set(f"{info['sample_count']:,}")
+                    
+                    self.file_duration = duration_sec
+                else:
+                    self.duration_var.set("Error reading file")
+                    self.samples_var.set("--")
+                    
+            except Exception as e:
+                self.logger.error(f"Error reading file info: {e}")
+                self.duration_var.set("--")
+                self.samples_var.set("--")
         else:
             self.filename_var.set("No file loaded")
             self.duration_var.set("--")
-            self.status_var.set("Ready")
+            self.samples_var.set("--")
     
-    def _calculate_duration(self):
+    def _on_speed_change(self, value):
         """
-        Calculate the total duration of the loaded recording file.
-        Uses timestamp math to determine playback time.
+        Handle playback speed slider change.
         
-        TODO: Implement actual timestamp calculation based on file format
+        Args:
+            value: New speed value from slider
         """
-        if not self.loaded_file_path or not self.loaded_file_path.exists():
-            self.duration_var.set("--")
-            self.loaded_data = None
-            self.play_button.configure(state="disabled")
-            return
+        speed = float(value)
+        self.speed_label_var.set(f"{speed:.1f}x")
         
-        try:
-            # Read file and calculate duration
-            with open(self.loaded_file_path, 'r') as f:
-                data = json.load(f)
-            
-            # Store loaded data for playback
-            self.loaded_data = data
-                
-            # Example duration calculation (to be implemented)
-            # Extract first and last timestamps
-            if isinstance(data, list) and len(data) > 0:
-                if 'timestamp' in data[0] and 'timestamp' in data[-1]:
-                    duration = data[-1]['timestamp'] - data[0]['timestamp']
-                    self.file_duration = duration
-                    self._format_duration(duration)
-                    # Enable play button if data is valid
-                    self.play_button.configure(state="normal")
-                else:
-                    self.duration_var.set("Unknown format")
-                    self.loaded_data = None
-                    self.play_button.configure(state="disabled")
-            else:
-                self.duration_var.set("Empty file")
-                self.loaded_data = None
-                self.play_button.configure(state="disabled")
-                
-        except json.JSONDecodeError:
-            self.duration_var.set("Invalid file format")
-            self.loaded_data = None
-            self.play_button.configure(state="disabled")
-        except Exception as e:
-            self.duration_var.set(f"Error: {str(e)}")
-            self.loaded_data = None
-            self.play_button.configure(state="disabled")
+        # Update player speed if currently playing
+        if self.is_playing and self.player:
+            try:
+                self.player.set_speed(speed)
+            except Exception as e:
+                self.logger.error(f"Error setting playback speed: {e}")
     
     def _format_duration(self, seconds: float):
         """
@@ -296,121 +481,61 @@ class PiperAutomationUI:
             secs = seconds % 60
             self.duration_var.set(f"{hours}h {minutes}m {secs:.0f}s")
     
-    async def _record_async(self):
+    def _update_status_loop(self):
         """
-        Async task for recording robot movements.
-        This runs the recording loop without blocking the UI.
-        
-        TODO: Implement actual recording logic using Piper SDK
+        Update status information periodically (recording/playback progress).
         """
         try:
-            while self.is_recording:
-                # Placeholder: Add actual recording logic here
-                # Example:
-                # joint_data = piper.GetArmJointMsgs()
-                # Save data to recording buffer
-                
-                await asyncio.sleep(0.005)  # 200 Hz recording rate
-                
-        except Exception as e:
-            self.status_var.set(f"Recording error: {str(e)}")
-            self.is_recording = False
-            self.record_button.configure(text="Record")
-    
-    async def _playback_async(self):
-        """
-        Async task for playing back recorded robot movements.
-        This runs the playback loop without blocking the UI.
-        
-        TODO: Implement actual playback logic using Piper SDK
-        """
-        try:
-            if not self.loaded_data:
-                return
+            # Update recording status
+            if self.is_recording and self.recorder:
+                stats = self.recorder.get_recording_stats()
+                if stats:
+                    sample_count = stats.get('sample_count', 0)
+                    duration = stats.get('duration_sec', 0)
+                    rate = stats.get('current_rate', 0)
+                    self.status_var.set(
+                        f"Recording... {sample_count:,} samples, {duration:.1f}s, {rate:.0f} Hz"
+                    )
             
-            # Calculate playback timing
-            start_index = 0
-            
-            for i, record in enumerate(self.loaded_data):
-                if not self.is_playing:
-                    # Playback was paused
-                    break
-                
-                # Placeholder: Add actual playback logic here
-                # Example:
-                # if 'joints' in record:
-                #     piper.JointCtrl(
-                #         joint_1=record['joints'][0],
-                #         joint_2=record['joints'][1],
-                #         ...
-                #     )
-                # if 'gripper' in record:
-                #     piper.GripperCtrl(...)
-                
-                # Calculate timing between frames
-                if i < len(self.loaded_data) - 1:
-                    if 'timestamp' in record and 'timestamp' in self.loaded_data[i + 1]:
-                        # Use actual time difference between records
-                        time_diff = self.loaded_data[i + 1]['timestamp'] - record['timestamp']
-                        await asyncio.sleep(max(0.001, time_diff))  # Minimum 1ms
-                    else:
-                        # Default to 200 Hz if no timestamps
-                        await asyncio.sleep(0.005)
+            # Update playback status and progress
+            if self.is_playing and self.player:
+                if not self.player.is_playing():
+                    # Playback completed
+                    self.is_playing = False
+                    self.play_button.configure(text="Play")
+                    self.record_button.configure(state="normal")
+                    self.load_button.configure(state="normal")
+                    self.speed_slider.configure(state="normal")
+                    self.progress_var.set(100.0)
+                    self.progress_label_var.set("100.0%")
+                    self.status_var.set("Playback completed")
+                    
+                    messagebox.showinfo("Playback Complete", "Recording playback finished successfully!")
                 else:
-                    await asyncio.sleep(0.005)
-            
-            # Playback completed
-            self.is_playing = False
-            self.play_button.configure(text="Play")
-            self.record_button.configure(state="normal")
-            self.load_button.configure(state="normal")
-            self.status_var.set("Playback completed")
-                
+                    # Update progress
+                    progress = self.player.get_progress()
+                    self.progress_var.set(progress)
+                    self.progress_label_var.set(f"{progress:.1f}%")
+                    
+                    info = self.player.get_playback_info()
+                    current = info.get('current_sample', 0)
+                    total = info.get('total_samples', 0)
+                    self.status_var.set(
+                        f"Playing... {current:,}/{total:,} samples ({progress:.1f}%)"
+                    )
+        
         except Exception as e:
-            self.status_var.set(f"Playback error: {str(e)}")
-            self.is_playing = False
-            self.play_button.configure(text="Play")
-            self.record_button.configure(state="normal")
-            self.load_button.configure(state="normal")
-    
-    async def _process_file_async(self):
-        """
-        Async task for processing loaded files.
-        Performs file validation and parsing without blocking the UI.
-        """
-        try:
-            self.status_var.set("Processing file...")
-            
-            # Simulate async file processing
-            await asyncio.sleep(0.1)
-            
-            self.status_var.set(f"Ready to playback: {self.loaded_file_path.name}")
-            
-        except Exception as e:
-            self.status_var.set(f"File processing error: {str(e)}")
-
-
-async def async_mainloop(root: tk.Tk):
-    """
-    Run the tkinter event loop asynchronously.
-    Allows tkinter to work with asyncio for concurrent operations.
-    
-    Args:
-        root: The main tkinter window
-    """
-    while True:
-        try:
-            root.update()
-            await asyncio.sleep(0.01)  # 100 Hz UI update rate
-        except tk.TclError:
-            # Window was closed
-            break
+            self.logger.error(f"Error in status update loop: {e}")
+        
+        finally:
+            # Schedule next update
+            self.root.after(100, self._update_status_loop)
 
 
 def main():
     """
     Main entry point for the application.
-    Initializes the UI and starts the async event loop.
+    Initializes the UI and starts the event loop.
     """
     # Create root window
     root = tk.Tk()
@@ -418,9 +543,9 @@ def main():
     # Initialize UI
     app = PiperAutomationUI(root)
     
-    # Run async event loop
+    # Run main loop
     try:
-        asyncio.run(async_mainloop(root))
+        root.mainloop()
     except KeyboardInterrupt:
         print("\nApplication closed by user")
 
