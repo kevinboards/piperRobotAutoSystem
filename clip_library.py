@@ -36,6 +36,7 @@ class ClipLibrary(ttk.Frame):
         self,
         parent,
         recordings_dir: str = "recordings",
+        timeline_manager: Optional['TimelineManager'] = None,
         on_add_clip: Optional[Callable[[TimelineClip], None]] = None,
         **kwargs
     ):
@@ -45,11 +46,13 @@ class ClipLibrary(ttk.Frame):
         Args:
             parent: Parent widget
             recordings_dir: Directory containing recordings
+            timeline_manager: Shared timeline manager (optional)
             on_add_clip: Callback when clip should be added to timeline
         """
         super().__init__(parent, **kwargs)
         
         self.recordings_dir = Path(recordings_dir)
+        self.timeline_manager = timeline_manager  # Use shared manager if provided
         self.on_add_clip = on_add_clip
         
         # State
@@ -351,15 +354,24 @@ class ClipLibrary(ttk.Frame):
             # Determine clip color based on name
             color = self._guess_clip_color(name)
             
-            clip = TimelineClip(
-                id=str(uuid.uuid4()),
-                recording_file=filepath,
-                start_time=0.0,  # Timeline will position it
-                duration=self.selected_recording['duration'],
-                original_duration=self.selected_recording['duration'],
-                name=name,
-                color=color
-            )
+            # Use timeline_manager if available, otherwise create clip directly
+            if self.timeline_manager:
+                clip = self.timeline_manager.create_clip_from_recording(
+                    filepath,
+                    start_time=0.0,
+                    name=name,
+                    color=color
+                )
+            else:
+                clip = TimelineClip(
+                    id=str(uuid.uuid4()),
+                    recording_file=filepath,
+                    start_time=0.0,  # Timeline will position it
+                    duration=self.selected_recording['duration'],
+                    original_duration=self.selected_recording['duration'],
+                    name=name,
+                    color=color
+                )
             
             # Call callback
             if self.on_add_clip:

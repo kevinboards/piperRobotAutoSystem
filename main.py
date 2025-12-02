@@ -63,7 +63,7 @@ class PiperAutomationUI:
         self.loaded_file_path: Optional[Path] = None
         self.file_duration: float = 0.0
         
-        # V2 Timeline state
+        # V2 Timeline state (create single shared instance)
         self.timeline_manager = TimelineManager()
         self.current_timeline: Optional[Timeline] = None
         
@@ -629,10 +629,11 @@ class PiperAutomationUI:
         parent.columnconfigure(1, weight=1)  # Library panel
         parent.rowconfigure(0, weight=1)
         
-        # Create timeline panel (left side)
+        # Create timeline panel (left side) - pass shared timeline_manager
         self.timeline_panel = TimelinePanel(
             parent,
             timeline=self.current_timeline or Timeline(name="New Timeline"),
+            timeline_manager=self.timeline_manager,  # Share the manager
             on_clip_select=self._on_timeline_clip_select,
             on_play=self._on_timeline_play,
             on_pause=self._on_timeline_pause,
@@ -643,6 +644,8 @@ class PiperAutomationUI:
         # Create clip library panel (right side)
         self.clip_library = ClipLibrary(
             parent,
+            recordings_dir="recordings",
+            timeline_manager=self.timeline_manager,  # Share the manager
             on_add_clip=self._on_library_add_clip
         )
         self.clip_library.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=10)

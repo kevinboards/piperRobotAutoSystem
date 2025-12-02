@@ -33,6 +33,7 @@ class TimelinePanel(ttk.Frame):
         self,
         parent,
         timeline: Optional[Timeline] = None,
+        timeline_manager: Optional[TimelineManager] = None,
         on_clip_select: Optional[Callable[[Optional[TimelineClip]], None]] = None,
         on_play: Optional[Callable[[], None]] = None,
         on_pause: Optional[Callable[[], None]] = None,
@@ -45,6 +46,7 @@ class TimelinePanel(ttk.Frame):
         Args:
             parent: Parent widget
             timeline: Initial timeline (optional)
+            timeline_manager: Shared timeline manager (optional, creates new if None)
             on_clip_select: Callback when clip selected
             on_play: Callback when play button clicked
             on_pause: Callback when pause button clicked
@@ -53,7 +55,7 @@ class TimelinePanel(ttk.Frame):
         super().__init__(parent, **kwargs)
         
         self.timeline = timeline or Timeline(name="New Timeline")
-        self.timeline_manager = TimelineManager()
+        self.timeline_manager = timeline_manager or TimelineManager()
         
         self.on_clip_select = on_clip_select
         self.on_play = on_play
