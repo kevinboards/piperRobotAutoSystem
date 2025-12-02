@@ -110,6 +110,12 @@ class TimelinePanel(ttk.Frame):
             file_frame, text="Save", command=self._save_timeline, width=6
         ).pack(side='left', padx=2)
         
+        ttk.Separator(file_frame, orient='vertical').pack(side='left', padx=5, fill='y')
+        
+        ttk.Button(
+            file_frame, text="➕ Add Recording", command=self._add_recording, width=14
+        ).pack(side='left', padx=2)
+        
         # Transport controls
         transport_frame = ttk.LabelFrame(parent, text="Playback", padding="5")
         transport_frame.pack(side='left', padx=5)
@@ -250,6 +256,41 @@ class TimelinePanel(ttk.Frame):
                 logger.info(f"Saved timeline to: {filepath}")
             else:
                 messagebox.showerror("Error", f"Failed to save timeline to:\n{filepath}")
+    
+    def _add_recording(self):
+        """Add a recording (.ppr file) to the timeline."""
+        filepath = filedialog.askopenfilename(
+            title="Add Recording to Timeline",
+            defaultextension=".ppr",
+            filetypes=[("Piper Recording", "*.ppr"), ("All Files", "*.*")],
+            initialdir="recordings"
+        )
+        
+        if filepath:
+            try:
+                # Create a clip from the recording
+                clip = self.timeline_manager.create_clip_from_recording(
+                    filepath,
+                    start_time=self.timeline.total_duration,  # Add at end
+                    name=None  # Will use filename
+                )
+                
+                # Add to timeline
+                self.timeline.add_clip(clip)
+                self.timeline_canvas.redraw()
+                self._update_info()
+                
+                messagebox.showinfo(
+                    "Recording Added",
+                    f"Added recording to timeline:\n{clip.name}\n\n"
+                    f"Duration: {clip.duration:.2f}s\n"
+                    f"Position: {clip.start_time:.2f}s"
+                )
+                logger.info(f"Added recording to timeline: {filepath}")
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to add recording:\n{e}")
+                logger.error(f"Failed to add recording: {e}")
     
     def _update_timeline_name(self):
         """Update timeline name from entry."""
