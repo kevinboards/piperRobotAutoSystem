@@ -67,11 +67,12 @@ class PiperAutomationUI:
         self.timeline_manager = TimelineManager()
         self.current_timeline: Optional[Timeline] = None
         
-        # Try to connect to robot
-        self._init_robot_connection()
-        
-        # Setup UI
+        # Setup UI FIRST (before robot connection)
         self._setup_ui()
+        
+        # Delay robot connection to avoid conflicts
+        # Connect after UI is fully initialized
+        self.root.after(500, self._init_robot_connection)
         
         # Start status update loop
         self.root.after(100, self._update_status_loop)
@@ -85,11 +86,14 @@ class PiperAutomationUI:
             return
         
         try:
+            self.logger.info("Attempting to connect to Piper robot...")
             self.piper = C_PiperInterface_V2()
+            self.logger.info("SDK interface created, connecting port...")
             self.piper.ConnectPort()
-            self.logger.info("Connected to Piper robot")
+            self.logger.info("Connected to Piper robot successfully")
         except Exception as e:
             self.logger.error(f"Failed to connect to robot: {e}")
+            self.piper = None
             messagebox.showwarning(
                 "Robot Connection",
                 f"Could not connect to Piper robot.\n\nError: {e}\n\nThe application will run in demo mode."
