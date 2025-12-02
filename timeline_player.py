@@ -1,19 +1,15 @@
 """
 Timeline Playback Engine for Piper Robot Automation System V2.
 
-Plays entire timeline sequences with:
-- Sequential clip playback
-- Gap handling (robot holds position)
-- Trim application
-- Per-clip speed multipliers
-- Progress tracking
+Simplified approach: Plays recordings sequentially using the existing V1 player.
+Timeline serves as a visual organizer for Program 1, Program 2, Program 3, etc.
 """
 
-import asyncio
 import time
 import logging
 from typing import Optional, Callable, Dict, Any
 from pathlib import Path
+import threading
 
 try:
     from piper_sdk import C_PiperInterface_V2
@@ -22,8 +18,7 @@ except ImportError:
     SDK_AVAILABLE = False
 
 from timeline import Timeline, TimelineClip
-from ppr_file_handler import read_ppr_file
-from clip_editor import apply_trim_to_data
+from player import PiperPlayer
 
 
 logger = logging.getLogger(__name__)
@@ -33,12 +28,11 @@ class TimelinePlayer:
     """
     Timeline playback engine.
     
-    Plays timeline sequences by:
-    1. Loading each clip's recording data
-    2. Applying trims
-    3. Playing at specified speed
-    4. Handling gaps (holding position)
-    5. Tracking progress
+    Simplified approach:
+    - Plays each recording file sequentially
+    - Uses existing PiperPlayer (proven to work)
+    - Handles gaps by waiting
+    - Timeline is visual organizer
     """
     
     def __init__(
@@ -64,16 +58,15 @@ class TimelinePlayer:
         
         # Playback state
         self.is_playing = False
-        self.is_paused = False
         self.should_stop = False
         self.current_position = 0.0  # seconds
         self.current_clip_index = 0
         
         self.logger = logging.getLogger(__name__)
     
-    async def play(self, start_position: float = 0.0):
+    def play_sync(self, start_position: float = 0.0):
         """
-        Play the timeline from a specific position.
+        Play the timeline (synchronous version for threading).
         
         Args:
             start_position: Starting position in seconds
@@ -87,17 +80,12 @@ class TimelinePlayer:
             return
         
         self.is_playing = True
-        self.is_paused = False
         self.should_stop = False
         self.current_position = start_position
         
         self.logger.info(f"Starting timeline playback from {start_position:.2f}s")
         
         try:
-            # Initialize robot if available
-            if self.piper:
-                await self._initialize_robot()
-            
             # Get sorted clips
             clips = self.timeline.get_sorted_clips()
             
@@ -120,12 +108,12 @@ class TimelinePlayer:
                     previous_clip = clips[i - 1]
                     if clip.start_time > previous_clip.end_time:
                         gap_duration = clip.start_time - previous_clip.end_time
-                        await self._play_gap(gap_duration)
+                        self._play_gap(gap_duration, previous_clip.end_time)
                         if self.should_stop:
                             break
                 
-                # Play the clip
-                await self._play_clip(clip)
+                # Play the clip using V1 player
+                self._play_clip(clip)
                 if self.should_stop:
                     break
             
@@ -138,38 +126,14 @@ class TimelinePlayer:
                 
         except Exception as e:
             self.logger.error(f"Error during timeline playback: {e}")
+            import traceback
+            traceback.print_exc()
             self.is_playing = False
             raise
     
-    async def _initialize_robot(self):
-        """Initialize robot for playback."""
-        self.logger.info("Initializing robot for timeline playback")
-        
-        # Set to slave mode
-        self.piper.MasterSlaveConfig(0xFC, 0, 0, 0)
-        await asyncio.sleep(0.2)
-        
-        # Enable robot
-        enable_attempts = 0
-        while not self.piper.EnablePiper():
-            await asyncio.sleep(0.01)
-            enable_attempts += 1
-            if enable_attempts >= 100:
-                raise RuntimeError("Failed to enable robot")
-        
-        await asyncio.sleep(0.1)
-        
-        # Initialize gripper
-        self.piper.GripperCtrl(0, 1000, 0x02, 0)  # Clear errors
-        await asyncio.sleep(0.1)
-        self.piper.GripperCtrl(0, 1000, 0x01, 0)  # Enable
-        await asyncio.sleep(0.1)
-        
-        self.logger.info("Robot initialized successfully")
-    
-    async def _play_clip(self, clip: TimelineClip):
+    def _play_clip(self, clip: TimelineClip):
         """
-        Play a single clip.
+        Play a single clip using the V1 player.
         
         Args:
             clip: Clip to play
@@ -182,134 +146,77 @@ class TimelinePlayer:
             return
         
         try:
-            data, metadata = read_ppr_file(clip.recording_file)
-            if not data:
-                self.logger.error(f"No data in recording: {clip.recording_file}")
-                return
+            # Create V1 player for this clip
+            player = PiperPlayer(
+                self.piper,
+                clip.recording_file,
+                speed_multiplier=clip.speed_multiplier
+            )
             
-            # Apply trims
-            if clip.trim_start > 0 or clip.trim_end > 0:
-                data = apply_trim_to_data(data, clip.trim_start, clip.trim_end)
-                self.logger.info(f"Applied trims: start={clip.trim_start:.2f}s, end={clip.trim_end:.2f}s")
+            # Load the recording
+            player.load_recording()
             
-            # Calculate playback interval based on speed
-            base_interval = 0.005  # 5ms = 200 Hz
-            interval = base_interval / clip.speed_multiplier
+            # Apply trims if needed
+            # TODO: Add trim support to V1 player or filter data here
             
-            # Play each data point
-            for i, point in enumerate(data):
+            # Start playback (synchronous)
+            player.play()
+            
+            # Wait for playback to complete
+            while player.is_playing():
                 if self.should_stop:
+                    player.stop()
                     break
-                
-                # Handle pause
-                while self.is_paused and not self.should_stop:
-                    await asyncio.sleep(0.1)
-                
-                if self.should_stop:
-                    break
-                
-                # Send position to robot
-                if self.piper:
-                    await self._send_position(point)
                 
                 # Update progress
-                self.current_position = clip.start_time + (i / len(data)) * clip.duration
-                if self.on_progress:
-                    self.on_progress(self.current_position, clip.name)
+                progress_info = player.get_playback_info()
+                samples_played = progress_info.get('current_sample', 0)
+                total_samples = progress_info.get('total_samples', 1)
                 
-                # Wait for next point
-                await asyncio.sleep(interval)
+                if total_samples > 0:
+                    clip_progress = samples_played / total_samples
+                    self.current_position = clip.start_time + (clip_progress * clip.duration)
+                    
+                    if self.on_progress:
+                        self.on_progress(self.current_position, clip.name)
                 
+                time.sleep(0.05)  # Check every 50ms
+            
         except Exception as e:
             self.logger.error(f"Error playing clip {clip.name}: {e}")
-            raise
+            import traceback
+            traceback.print_exc()
     
-    async def _send_position(self, point: Dict[str, Any]):
-        """
-        Send position command to robot.
-        
-        Args:
-            point: Data point with joint angles and gripper state
-        """
-        try:
-            # Set control mode before every command (critical!)
-            self.piper.MotionCtrl_2(0x01, 0x01, 100, 0x00)
-            
-            # Send joint angles
-            joints = point.get('joint_angles', {})
-            j1 = joints.get('joint_1', 0.0)
-            j2 = joints.get('joint_2', 0.0)
-            j3 = joints.get('joint_3', 0.0)
-            j4 = joints.get('joint_4', 0.0)
-            j5 = joints.get('joint_5', 0.0)
-            j6 = joints.get('joint_6', 0.0)
-            
-            self.piper.JointCtrl(j1, j2, j3, j4, j5, j6)
-            
-            # Send gripper command
-            gripper = point.get('gripper', {})
-            gripper_angle = gripper.get('angle', 0.0)
-            gripper_effort = max(0, min(abs(gripper.get('effort', 1000)), 5000))
-            gripper_code = gripper.get('status', 0x01)
-            
-            self.piper.GripperCtrl(gripper_angle, gripper_effort, gripper_code, 0)
-            
-        except Exception as e:
-            self.logger.error(f"Error sending position: {e}")
-            # Continue playback even if one position fails
-    
-    async def _play_gap(self, duration: float):
+    def _play_gap(self, duration: float, gap_start_time: float):
         """
         Play a gap (hold current position).
         
         Args:
             duration: Gap duration in seconds
+            gap_start_time: Timeline position where gap starts
         """
         self.logger.info(f"Playing gap: {duration:.2f}s")
         
-        # Hold position for the gap duration
+        # Simply wait for the gap duration
         start_time = time.time()
-        interval = 0.005  # 5ms
         
         while (time.time() - start_time) < duration:
             if self.should_stop:
                 break
             
-            # Handle pause
-            while self.is_paused and not self.should_stop:
-                await asyncio.sleep(0.1)
-            
-            if self.should_stop:
-                break
-            
-            # Update progress
+            # Update progress during gap
             elapsed = time.time() - start_time
-            # Position during gap is the start of the gap
-            if self.on_progress:
-                gap_position = self.current_position + elapsed
-                self.on_progress(gap_position, "Gap (holding position)")
+            self.current_position = gap_start_time + elapsed
             
-            await asyncio.sleep(interval)
-        
-        self.current_position += duration
-    
-    def pause(self):
-        """Pause playback."""
-        if self.is_playing:
-            self.is_paused = True
-            self.logger.info("Timeline playback paused")
-    
-    def resume(self):
-        """Resume playback."""
-        if self.is_playing and self.is_paused:
-            self.is_paused = False
-            self.logger.info("Timeline playback resumed")
+            if self.on_progress:
+                self.on_progress(self.current_position, "Gap (holding position)")
+            
+            time.sleep(0.1)  # Update every 100ms
     
     def stop(self):
         """Stop playback."""
         self.should_stop = True
         self.is_playing = False
-        self.is_paused = False
         self.current_position = 0.0
         self.logger.info("Timeline playback stopped")
     
@@ -328,7 +235,5 @@ class TimelinePlayer:
             'total_duration': total_duration,
             'progress_percent': progress_percent,
             'is_playing': self.is_playing,
-            'is_paused': self.is_paused,
             'current_clip_index': self.current_clip_index
         }
-

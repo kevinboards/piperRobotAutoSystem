@@ -694,13 +694,13 @@ class PiperAutomationUI:
             on_complete=self._on_timeline_complete
         )
         
-        # Start playback in async task using asyncio.run in thread
+        # Start playback in background thread using sync version
         import threading
         
         def run_playback():
             try:
                 playhead_pos = self.timeline_panel.get_playhead_position()
-                asyncio.run(self.timeline_player.play(start_position=playhead_pos))
+                self.timeline_player.play_sync(start_position=playhead_pos)
             except Exception as e:
                 self.logger.error(f"Timeline playback error: {e}")
                 # Schedule UI update on main thread
