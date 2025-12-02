@@ -136,6 +136,32 @@ class TimelinePanel(ttk.Frame):
             transport_frame, text="⏹ Stop", command=self._on_stop_clicked, width=8
         ).pack(side='left', padx=2)
         
+        # Speed preset buttons
+        speed_frame = ttk.LabelFrame(parent, text="Speed", padding="5")
+        speed_frame.pack(side='left', padx=5)
+        
+        self.selected_speed = tk.DoubleVar(value=1.0)
+        
+        speed_presets = [(1.0, "1x"), (2.0, "2x"), (3.0, "3x"), (4.0, "4x")]
+        
+        for speed, label in speed_presets:
+            btn = ttk.Button(
+                speed_frame,
+                text=label,
+                command=lambda s=speed: self._set_speed(s),
+                width=4
+            )
+            btn.pack(side='left', padx=2)
+        
+        # Current speed indicator
+        self.speed_label = ttk.Label(
+            speed_frame,
+            text="1x",
+            font=("Segoe UI", 9, "bold"),
+            foreground="#0066CC"
+        )
+        self.speed_label.pack(side='left', padx=5)
+        
         # Zoom controls
         zoom_frame = ttk.LabelFrame(parent, text="View", padding="5")
         zoom_frame.pack(side='left', padx=5)
@@ -308,6 +334,26 @@ class TimelinePanel(ttk.Frame):
         
         if self.on_play:
             self.on_play()
+    
+    def _set_speed(self, speed: float):
+        """
+        Set timeline playback speed.
+        
+        Args:
+            speed: Speed multiplier (1.0, 2.0, 3.0, or 4.0)
+        """
+        self.selected_speed.set(speed)
+        self.speed_label.config(text=f"{speed:.0f}x")
+        logger.info(f"Timeline speed set to {speed}x")
+    
+    def get_selected_speed(self) -> float:
+        """
+        Get currently selected speed.
+        
+        Returns:
+            Speed multiplier
+        """
+        return self.selected_speed.get()
     
     def _on_pause_clicked(self):
         """Handle pause button click."""

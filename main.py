@@ -686,10 +686,14 @@ class PiperAutomationUI:
         
         self.logger.info("Starting timeline playback")
         
+        # Get selected speed from timeline panel
+        speed = self.timeline_panel.get_selected_speed()
+        
         # Create timeline player
         self.timeline_player = TimelinePlayer(
             self.piper,
             timeline,
+            global_speed=speed,
             on_progress=self._on_timeline_progress,
             on_complete=self._on_timeline_complete
         )

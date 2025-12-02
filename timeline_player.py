@@ -39,6 +39,7 @@ class TimelinePlayer:
         self,
         piper_interface: Optional[C_PiperInterface_V2],
         timeline: Timeline,
+        global_speed: float = 1.0,
         on_progress: Optional[Callable[[float, str], None]] = None,
         on_complete: Optional[Callable[[], None]] = None
     ):
@@ -48,11 +49,13 @@ class TimelinePlayer:
         Args:
             piper_interface: Piper robot interface (None for simulation)
             timeline: Timeline to play
+            global_speed: Global speed multiplier for entire timeline (1x, 2x, 3x, 4x)
             on_progress: Callback for progress updates (position, clip_name)
             on_complete: Callback when playback completes
         """
         self.piper = piper_interface
         self.timeline = timeline
+        self.global_speed = global_speed
         self.on_progress = on_progress
         self.on_complete = on_complete
         
@@ -138,7 +141,9 @@ class TimelinePlayer:
         Args:
             clip: Clip to play
         """
-        self.logger.info(f"Playing clip: {clip.name} (speed: {clip.speed_multiplier}x)")
+        # Calculate effective speed (clip speed * global speed)
+        effective_speed = clip.speed_multiplier * self.global_speed
+        self.logger.info(f"Playing clip: {clip.name} (speed: {effective_speed}x = {clip.speed_multiplier}x × {self.global_speed}x)")
         
         # Load recording data
         if not Path(clip.recording_file).exists():
@@ -147,17 +152,13 @@ class TimelinePlayer:
         
         try:
             # Create V1 player for this clip
-            player = PiperPlayer(
-                self.piper,
-                clip.recording_file,
-                speed_multiplier=clip.speed_multiplier
-            )
+            player = PiperPlayer(self.piper)
             
             # Load the recording
-            player.load_recording()
+            player.load_recording(clip.recording_file)
             
-            # Apply trims if needed
-            # TODO: Add trim support to V1 player or filter data here
+            # Set speed (clip speed multiplied by global speed)
+            player.set_speed(effective_speed)
             
             # Start playback (synchronous)
             player.play()
