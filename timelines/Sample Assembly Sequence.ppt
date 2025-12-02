@@ -1,0 +1,66 @@
+{
+  "version": "2.0",
+  "name": "Sample Assembly Sequence",
+  "created": "2025-12-01T21:12:08.680893",
+  "modified": "2025-12-01T21:12:08.683997",
+  "clips": [
+    {
+      "id": "clip_001",
+      "recording_file": "recordings/pick_part_a.ppr",
+      "start_time": 0.0,
+      "duration": 9.8,
+      "trim_start": 0.5,
+      "trim_end": 0.2,
+      "speed_multiplier": 1.0,
+      "enabled": true,
+      "name": "Pick Part A",
+      "color": "#4CAF50",
+      "original_duration": 10.5
+    },
+    {
+      "id": "clip_002",
+      "recording_file": "recordings/move_to_station.ppr",
+      "start_time": 15.0,
+      "duration": 5.5,
+      "trim_start": 0.0,
+      "trim_end": 0.0,
+      "speed_multiplier": 2.0,
+      "enabled": true,
+      "name": "Move to Assembly Station",
+      "color": "#FF9800",
+      "original_duration": 5.5
+    },
+    {
+      "id": "clip_003",
+      "recording_file": "recordings/place_part_a.ppr",
+      "start_time": 20.5,
+      "duration": 8.0,
+      "trim_start": 0.0,
+      "trim_end": 0.0,
+      "speed_multiplier": 0.5,
+      "enabled": true,
+      "name": "Place Part A",
+      "color": "#2196F3",
+      "original_duration": 8.0
+    },
+    {
+      "id": "clip_004",
+      "recording_file": "recordings/return_home.ppr",
+      "start_time": 28.5,
+      "duration": 6.0,
+      "trim_start": 0.0,
+      "trim_end": 0.0,
+      "speed_multiplier": 2.0,
+      "enabled": true,
+      "name": "Return to Home",
+      "color": "#F44336",
+      "original_duration": 6.0
+    }
+  ],
+  "metadata": {
+    "description": "Example pick and place assembly operation",
+    "author": "Demo User",
+    "robot": "Piper",
+    "workspace": "Assembly Station 1"
+  }
+}
