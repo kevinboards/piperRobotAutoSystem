@@ -122,11 +122,6 @@ class PiperRecorder:
                 self.piper.MasterSlaveConfig(0xFC, 0, 0, 0)
                 time.sleep(0.2)
                 
-                # Reset robot
-                self.logger.info("Resetting robot...")
-                self.piper.ResetRobot()
-                time.sleep(0.5)
-                
                 # Enable robot
                 self.logger.info("Enabling robot...")
                 enable_attempts = 0
