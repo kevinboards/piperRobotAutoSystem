@@ -116,8 +116,19 @@ class PiperRecorder:
         
         # Enable robot if requested (critical for robot responsiveness)
         if enable_robot:
-            self.logger.info("Enabling robot...")
             try:
+                # Set to slave mode (ready to receive commands)
+                self.logger.info("Setting robot to slave mode...")
+                self.piper.MasterSlaveConfig(0xFC, 0, 0, 0)
+                time.sleep(0.2)
+                
+                # Reset robot
+                self.logger.info("Resetting robot...")
+                self.piper.ResetRobot()
+                time.sleep(0.5)
+                
+                # Enable robot
+                self.logger.info("Enabling robot...")
                 enable_attempts = 0
                 max_attempts = 100
                 while not self.piper.EnablePiper():

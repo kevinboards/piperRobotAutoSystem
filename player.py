@@ -142,6 +142,16 @@ class PiperPlayer:
         
         # Verify robot is enabled and prepare for playback
         try:
+            # Set to slave mode (ready to receive commands)
+            self.logger.info("Setting robot to slave mode...")
+            self.piper.MasterSlaveConfig(0xFC, 0, 0, 0)
+            time.sleep(0.2)
+            
+            # Reset robot
+            self.logger.info("Resetting robot...")
+            self.piper.ResetRobot()
+            time.sleep(0.5)
+            
             # Enable the robot (critical!)
             self.logger.info("Enabling robot...")
             enable_attempts = 0

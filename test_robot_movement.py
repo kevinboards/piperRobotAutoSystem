@@ -52,9 +52,23 @@ def test_basic_movement():
         time.sleep(0.1)
         logger.info("✓ Connected")
         
-        # Step 2: Enable
+        # Step 2: Set to slave mode (ready to receive commands)
         print()
-        logger.info("Step 2: Enabling robot...")
+        logger.info("Step 2: Setting robot to slave mode (ready to receive commands)...")
+        piper.MasterSlaveConfig(0xFC, 0, 0, 0)
+        time.sleep(0.2)
+        logger.info("✓ Slave mode configured")
+        
+        # Step 3: Reset robot
+        print()
+        logger.info("Step 3: Resetting robot...")
+        piper.ResetRobot()
+        time.sleep(0.5)  # Wait for reset to complete
+        logger.info("✓ Robot reset")
+        
+        # Step 4: Enable
+        print()
+        logger.info("Step 4: Enabling robot...")
         enable_attempts = 0
         while not piper.EnablePiper():
             time.sleep(0.01)
@@ -65,27 +79,27 @@ def test_basic_movement():
         logger.info("✓ Robot enabled")
         time.sleep(0.1)
         
-        # Step 3: Initialize gripper
+        # Step 5: Initialize gripper
         print()
-        logger.info("Step 3: Initializing gripper...")
+        logger.info("Step 5: Initializing gripper...")
         piper.GripperCtrl(0, 1000, 0x02, 0)  # Clear errors
         time.sleep(0.1)
         piper.GripperCtrl(0, 1000, 0x01, 0)  # Enable
         time.sleep(0.1)
         logger.info("✓ Gripper initialized")
         
-        # Step 4: Read current position
+        # Step 6: Read current position
         print()
-        logger.info("Step 4: Reading current position...")
+        logger.info("Step 6: Reading current position...")
         joint_data = piper.GetArmJointMsgs()
         current_j1 = joint_data.joint_state.joint_1
         current_j2 = joint_data.joint_state.joint_2
         current_j3 = joint_data.joint_state.joint_3
         logger.info(f"Current position: J1={current_j1/1000:.2f}° J2={current_j2/1000:.2f}° J3={current_j3/1000:.2f}°")
         
-        # Step 5: Test movement
+        # Step 7: Test movement
         print()
-        logger.info("Step 5: Testing movement...")
+        logger.info("Step 7: Testing movement...")
         logger.info("The robot will move slightly and return to starting position")
         
         # Position 1: Current position (no movement yet)
@@ -121,17 +135,17 @@ def test_basic_movement():
             piper.GripperCtrl(0, 1000, 0x01, 0)
             time.sleep(0.1)
         
-        # Step 6: Verify final position
+        # Step 8: Verify final position
         print()
-        logger.info("Step 6: Verifying final position...")
+        logger.info("Step 8: Verifying final position...")
         time.sleep(0.5)
         final_joint_data = piper.GetArmJointMsgs()
         final_j1 = final_joint_data.joint_state.joint_1
         logger.info(f"Final position: J1={final_j1/1000:.2f}°")
         
-        # Step 7: Disable
+        # Step 9: Disable
         print()
-        logger.info("Step 7: Disabling robot...")
+        logger.info("Step 9: Disabling robot...")
         while piper.DisablePiper():
             time.sleep(0.01)
         logger.info("✓ Robot disabled")
