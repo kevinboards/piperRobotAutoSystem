@@ -133,15 +133,15 @@ class TimelinePanel(ttk.Frame):
         zoom_frame.pack(side='left', padx=5)
         
         ttk.Button(
-            zoom_frame, text="➕", command=self.timeline_canvas.zoom_in, width=3
+            zoom_frame, text="➕", command=lambda: self.timeline_canvas.zoom_in(), width=3
         ).pack(side='left', padx=2)
         
         ttk.Button(
-            zoom_frame, text="➖", command=self.timeline_canvas.zoom_out, width=3
+            zoom_frame, text="➖", command=lambda: self.timeline_canvas.zoom_out(), width=3
         ).pack(side='left', padx=2)
         
         ttk.Button(
-            zoom_frame, text="Fit", command=self.timeline_canvas.zoom_to_fit, width=4
+            zoom_frame, text="Fit", command=lambda: self.timeline_canvas.zoom_to_fit(), width=4
         ).pack(side='left', padx=2)
         
         # Timeline name
