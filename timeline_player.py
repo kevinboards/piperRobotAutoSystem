@@ -160,8 +160,8 @@ class TimelinePlayer:
             # Set speed (clip speed multiplied by global speed)
             player.set_speed(effective_speed)
             
-            # Start playback (synchronous)
-            player.play()
+            # Start playback
+            player.start_playback()
             
             # Wait for playback to complete
             while player.is_playing():
