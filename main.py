@@ -4,6 +4,7 @@ Async GUI for recording and playing back robot movements
 """
 
 import asyncio
+import time
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
@@ -737,17 +738,39 @@ class PiperAutomationUI:
     def _on_timeline_progress(self, position: float, clip_name: str):
         """Handle timeline playback progress update."""
         # Update playhead position on timeline (schedule on main thread for thread safety)
-        self.root.after(0, lambda: self.timeline_panel.set_playhead_position(position))
+        # Only update every 200ms to avoid overwhelming the UI
+        current_time = time.time()
+        if not hasattr(self, '_last_progress_update'):
+            self._last_progress_update = 0
+        
+        if current_time - self._last_progress_update > 0.2:  # 200ms throttle
+            self._last_progress_update = current_time
+            self.root.after(0, lambda: self.timeline_panel.set_playhead_position(position))
     
     def _on_timeline_complete(self):
         """Handle timeline playback completion."""
         self.logger.info("Timeline playback completed")
+        
         # Schedule UI updates on main thread
-        self.root.after(0, lambda: self.timeline_panel.set_playhead_position(0.0))
-        self.root.after(0, lambda: messagebox.showinfo(
-            "Playback Complete",
-            "Timeline playback finished successfully!"
-        ))
+        def update_ui():
+            # Reset playhead position
+            self.timeline_panel.set_playhead_position(0.0)
+            
+            # Reset button states
+            self.timeline_panel.play_button.config(state='normal')
+            self.timeline_panel.pause_button.config(state='disabled')
+            self.timeline_panel.is_playing = False
+            
+            # Refresh the canvas to clear any visual artifacts
+            self.timeline_panel.timeline_canvas.redraw()
+            
+            # Show completion message
+            messagebox.showinfo(
+                "Playback Complete",
+                "Timeline playback finished successfully!"
+            )
+        
+        self.root.after(0, update_ui)
 
 
 def main():
