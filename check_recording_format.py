@@ -16,7 +16,7 @@ def analyze_recording(filepath: str):
     print(f"{'='*70}\n")
     
     try:
-        data = read_ppr_file(filepath)
+        data, metadata = read_ppr_file(filepath)
         
         if not data:
             print("❌ No data in file")

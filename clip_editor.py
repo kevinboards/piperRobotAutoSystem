@@ -52,7 +52,8 @@ class ClipEditor:
                 logger.error(f"Recording file not found: {self.clip.recording_file}")
                 return None
             
-            data = read_ppr_file(self.clip.recording_file)
+            # read_ppr_file returns (data, metadata) tuple
+            data, metadata = read_ppr_file(self.clip.recording_file)
             self._cached_data = data
             self._cached_filepath = self.clip.recording_file
             return data

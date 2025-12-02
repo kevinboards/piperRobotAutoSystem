@@ -182,7 +182,7 @@ class TimelinePlayer:
             return
         
         try:
-            data = read_ppr_file(clip.recording_file)
+            data, metadata = read_ppr_file(clip.recording_file)
             if not data:
                 self.logger.error(f"No data in recording: {clip.recording_file}")
                 return

@@ -473,7 +473,9 @@ class TimelineManager:
             # Import here to avoid circular dependency
             from ppr_file_handler import read_ppr_file
             
-            data = read_ppr_file(recording_file)
+            # read_ppr_file returns (data_list, metadata) tuple
+            data, metadata = read_ppr_file(recording_file)
+            
             if not data or len(data) < 2:
                 logger.warning(f"Recording has insufficient data: {recording_file}")
                 return 0.0
@@ -503,6 +505,8 @@ class TimelineManager:
             
         except Exception as e:
             logger.warning(f"Could not read recording duration from {recording_file}: {e}")
+            import traceback
+            traceback.print_exc()
             # Return a default duration if we can't read the file
             return 10.0
     
