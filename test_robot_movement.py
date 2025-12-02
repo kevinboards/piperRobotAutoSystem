@@ -4,7 +4,7 @@ Robot Movement Test Script
 Simple script to verify the robot responds to basic movement commands.
 Use this to diagnose if the robot is working properly before using playback.
 """
-
+#made some changes again
 import time
 import logging
 
