@@ -232,14 +232,25 @@ def apply_trim_to_data(
     # Get timestamp range
     first_timestamp = data[0]['timestamp']
     last_timestamp = data[-1]['timestamp']
-    duration_ms = last_timestamp - first_timestamp
+    time_diff = last_timestamp - first_timestamp
     
-    # Calculate trim timestamps
-    trim_start_ms = trim_start * 1000
-    trim_end_ms = trim_end * 1000
+    # Determine timestamp unit and calculate multiplier
+    if time_diff > 100000:
+        # Microseconds
+        time_multiplier = 1_000_000.0
+    elif time_diff > 1000:
+        # Milliseconds
+        time_multiplier = 1000.0
+    else:
+        # Seconds
+        time_multiplier = 1.0
     
-    start_timestamp = first_timestamp + trim_start_ms
-    end_timestamp = last_timestamp - trim_end_ms
+    # Calculate trim amounts in timestamp units
+    trim_start_units = trim_start * time_multiplier
+    trim_end_units = trim_end * time_multiplier
+    
+    start_timestamp = first_timestamp + trim_start_units
+    end_timestamp = last_timestamp - trim_end_units
     
     # Filter data
     trimmed_data = [
@@ -321,23 +332,29 @@ def suggest_trim_values(
     Returns:
         Tuple of (trim_start, trim_end) in seconds
     """
-    if not data:
+    if not data or len(data) <= 1:
         return 0.0, 0.0
     
     # Calculate time per sample
     first_timestamp = data[0]['timestamp']
     last_timestamp = data[-1]['timestamp']
-    duration_ms = last_timestamp - first_timestamp
+    time_diff = last_timestamp - first_timestamp
     total_samples = len(data)
     
-    if total_samples <= 1:
-        return 0.0, 0.0
+    # Determine timestamp unit
+    if time_diff > 100000:
+        # Microseconds
+        time_per_sample = time_diff / (total_samples - 1) / 1_000_000.0
+    elif time_diff > 1000:
+        # Milliseconds
+        time_per_sample = time_diff / (total_samples - 1) / 1000.0
+    else:
+        # Seconds
+        time_per_sample = time_diff / (total_samples - 1)
     
-    ms_per_sample = duration_ms / (total_samples - 1)
-    
-    # Calculate trim values
-    trim_start = (remove_first_n_samples * ms_per_sample) / 1000.0
-    trim_end = (remove_last_n_samples * ms_per_sample) / 1000.0
+    # Calculate trim values in seconds
+    trim_start = remove_first_n_samples * time_per_sample
+    trim_end = remove_last_n_samples * time_per_sample
     
     return trim_start, trim_end
 

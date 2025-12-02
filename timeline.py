@@ -474,15 +474,33 @@ class TimelineManager:
             from ppr_file_handler import read_ppr_file
             
             data = read_ppr_file(recording_file)
-            if not data:
+            if not data or len(data) < 2:
+                logger.warning(f"Recording has insufficient data: {recording_file}")
                 return 0.0
             
-            # Calculate duration from timestamps
+            # Get first and last timestamps
             first_timestamp = data[0]['timestamp']
             last_timestamp = data[-1]['timestamp']
-            duration = (last_timestamp - first_timestamp) / 1000.0  # Convert ms to seconds
             
+            # Calculate raw difference
+            time_diff = last_timestamp - first_timestamp
+            
+            # Determine timestamp unit based on magnitude
+            # If difference > 1000, likely milliseconds or microseconds
+            # If difference < 100, likely seconds
+            if time_diff > 100000:
+                # Likely microseconds (time.time() * 1000000)
+                duration = time_diff / 1_000_000.0
+            elif time_diff > 1000:
+                # Likely milliseconds (time.time() * 1000)
+                duration = time_diff / 1000.0
+            else:
+                # Likely seconds
+                duration = time_diff
+            
+            logger.info(f"Recording duration: {duration:.2f}s ({len(data)} samples, time_diff={time_diff})")
             return duration
+            
         except Exception as e:
             logger.warning(f"Could not read recording duration from {recording_file}: {e}")
             # Return a default duration if we can't read the file
