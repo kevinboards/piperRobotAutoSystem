@@ -208,27 +208,28 @@ class PiperAutomationUI:
         )
         progress_label.pack()
         
-        # Playback speed control
-        speed_frame = ttk.LabelFrame(main_frame, text="Playback Speed", padding="10")
+        # Playback speed control (V2: Extended to 4x)
+        speed_frame = ttk.LabelFrame(main_frame, text="Playback Speed (V2)", padding="10")
         speed_frame.grid(row=4, column=0, pady=10, sticky="ew")
         
+        # Speed slider
         speed_control_frame = ttk.Frame(speed_frame)
-        speed_control_frame.pack(fill='x')
+        speed_control_frame.pack(fill='x', pady=(0, 10))
         
-        ttk.Label(speed_control_frame, text="0.5x").pack(side='left', padx=5)
+        ttk.Label(speed_control_frame, text="0.1x").pack(side='left', padx=5)
         
         self.speed_var = tk.DoubleVar(value=1.0)
         self.speed_slider = ttk.Scale(
             speed_control_frame,
-            from_=0.5,
-            to=2.0,
+            from_=0.1,
+            to=4.0,
             variable=self.speed_var,
             orient='horizontal',
             command=self._on_speed_change
         )
         self.speed_slider.pack(side='left', fill='x', expand=True, padx=5)
         
-        ttk.Label(speed_control_frame, text="2.0x").pack(side='left', padx=5)
+        ttk.Label(speed_control_frame, text="4.0x").pack(side='left', padx=5)
         
         self.speed_label_var = tk.StringVar(value="1.0x")
         speed_value_label = ttk.Label(
@@ -238,6 +239,29 @@ class PiperAutomationUI:
             width=6
         )
         speed_value_label.pack(side='left', padx=10)
+        
+        # Speed preset buttons
+        preset_frame = ttk.Frame(speed_frame)
+        preset_frame.pack(fill='x')
+        
+        ttk.Label(preset_frame, text="Presets:").pack(side='left', padx=(0, 10))
+        
+        speed_presets = [
+            ("0.25x", 0.25),
+            ("0.5x", 0.5),
+            ("1.0x", 1.0),
+            ("2.0x", 2.0),
+            ("4.0x", 4.0)
+        ]
+        
+        for label, value in speed_presets:
+            btn = ttk.Button(
+                preset_frame,
+                text=label,
+                command=lambda v=value: self._set_speed_preset(v),
+                width=6
+            )
+            btn.pack(side='left', padx=2)
         
         # Status bar
         status_frame = ttk.Frame(main_frame)
@@ -445,6 +469,40 @@ class PiperAutomationUI:
             self.duration_var.set("--")
             self.samples_var.set("--")
     
+    def _set_speed_preset(self, speed: float):
+        """
+        Set playback speed to a preset value.
+        
+        Args:
+            speed: Speed multiplier (0.25, 0.5, 1.0, 2.0, or 4.0)
+        """
+        # Show warning for high speeds
+        if speed > 2.0:
+            response = messagebox.askyesno(
+                "High Speed Warning",
+                f"You are setting playback speed to {speed}x.\n\n"
+                f"This is {speed}x faster than the original recording.\n"
+                f"Please ensure:\n"
+                f"  • Workspace is completely clear\n"
+                f"  • Robot can safely move at this speed\n"
+                f"  • You are ready to emergency stop if needed\n\n"
+                f"Continue with {speed}x speed?",
+                icon='warning'
+            )
+            if not response:
+                return  # User cancelled
+        
+        self.speed_var.set(speed)
+        self.speed_label_var.set(f"{speed:.2f}x")
+        
+        # Update player if currently playing
+        if self.is_playing and self.player:
+            try:
+                self.player.set_speed(speed)
+                self.logger.info(f"Playback speed changed to {speed}x during playback")
+            except Exception as e:
+                self.logger.error(f"Error setting speed during playback: {e}")
+    
     def _on_speed_change(self, value):
         """
         Handle playback speed slider change.
@@ -453,7 +511,16 @@ class PiperAutomationUI:
             value: New speed value from slider
         """
         speed = float(value)
-        self.speed_label_var.set(f"{speed:.1f}x")
+        self.speed_label_var.set(f"{speed:.2f}x")
+        
+        # Show warning if crossing 2x threshold (only show once per session)
+        if speed > 2.0 and not hasattr(self, '_high_speed_warning_shown'):
+            self._high_speed_warning_shown = True
+            messagebox.showwarning(
+                "High Speed",
+                f"Playback speed is now above 2x.\n\n"
+                f"Monitor the robot carefully and be ready to stop if needed."
+            )
         
         # Update player speed if currently playing
         if self.is_playing and self.player:

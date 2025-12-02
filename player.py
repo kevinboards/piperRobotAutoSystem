@@ -382,10 +382,10 @@ class PiperPlayer:
         Change playback speed (can be done during playback).
         
         Args:
-            speed_multiplier: New speed multiplier (0.1 to 5.0)
+            speed_multiplier: New speed multiplier (0.1 to 4.0)
         """
-        if speed_multiplier < 0.1 or speed_multiplier > 5.0:
-            raise ValueError("Speed multiplier must be between 0.1 and 5.0")
+        if speed_multiplier < 0.1 or speed_multiplier > 4.0:
+            raise ValueError("Speed multiplier must be between 0.1 and 4.0")
         
         self._speed_multiplier = speed_multiplier
         self.logger.info(f"Playback speed set to {speed_multiplier}x")
