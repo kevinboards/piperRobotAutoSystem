@@ -694,15 +694,24 @@ class PiperAutomationUI:
             on_complete=self._on_timeline_complete
         )
         
-        # Start playback in async task
-        try:
-            playhead_pos = self.timeline_panel.get_playhead_position()
-            self.timeline_playback_task = asyncio.create_task(
-                self.timeline_player.play(start_position=playhead_pos)
-            )
-        except Exception as e:
-            self.logger.error(f"Failed to start timeline playback: {e}")
-            messagebox.showerror("Playback Error", f"Failed to start playback:\n{e}")
+        # Start playback in async task using asyncio.run in thread
+        import threading
+        
+        def run_playback():
+            try:
+                playhead_pos = self.timeline_panel.get_playhead_position()
+                asyncio.run(self.timeline_player.play(start_position=playhead_pos))
+            except Exception as e:
+                self.logger.error(f"Timeline playback error: {e}")
+                # Schedule UI update on main thread
+                self.root.after(0, lambda: messagebox.showerror(
+                    "Playback Error",
+                    f"Timeline playback failed:\n{e}"
+                ))
+        
+        # Run in background thread
+        playback_thread = threading.Thread(target=run_playback, daemon=True)
+        playback_thread.start()
     
     def _on_timeline_pause(self):
         """Handle timeline pause button."""
@@ -723,17 +732,18 @@ class PiperAutomationUI:
     
     def _on_timeline_progress(self, position: float, clip_name: str):
         """Handle timeline playback progress update."""
-        # Update playhead position on timeline
-        self.timeline_panel.set_playhead_position(position)
+        # Update playhead position on timeline (schedule on main thread for thread safety)
+        self.root.after(0, lambda: self.timeline_panel.set_playhead_position(position))
     
     def _on_timeline_complete(self):
         """Handle timeline playback completion."""
         self.logger.info("Timeline playback completed")
-        self.timeline_panel.set_playhead_position(0.0)
-        messagebox.showinfo(
+        # Schedule UI updates on main thread
+        self.root.after(0, lambda: self.timeline_panel.set_playhead_position(0.0))
+        self.root.after(0, lambda: messagebox.showinfo(
             "Playback Complete",
             "Timeline playback finished successfully!"
-        )
+        ))
 
 
 def main():
