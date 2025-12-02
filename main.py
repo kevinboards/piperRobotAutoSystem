@@ -24,6 +24,7 @@ from player import PiperPlayer
 from ppr_file_handler import list_recordings, get_recording_info
 from timeline_panel import TimelinePanel
 from timeline import Timeline, TimelineManager
+from clip_library import ClipLibrary
 
 # Setup logging
 logging.basicConfig(
@@ -624,10 +625,11 @@ class PiperAutomationUI:
 
     def _setup_v2_tab(self, parent):
         """Setup the V2 timeline editor tab."""
-        parent.columnconfigure(0, weight=1)
+        parent.columnconfigure(0, weight=3)  # Timeline gets more space
+        parent.columnconfigure(1, weight=1)  # Library panel
         parent.rowconfigure(0, weight=1)
         
-        # Create timeline panel
+        # Create timeline panel (left side)
         self.timeline_panel = TimelinePanel(
             parent,
             timeline=self.current_timeline or Timeline(name="New Timeline"),
@@ -636,7 +638,14 @@ class PiperAutomationUI:
             on_pause=self._on_timeline_pause,
             on_stop=self._on_timeline_stop
         )
-        self.timeline_panel.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        self.timeline_panel.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=10)
+        
+        # Create clip library panel (right side)
+        self.clip_library = ClipLibrary(
+            parent,
+            on_add_clip=self._on_library_add_clip
+        )
+        self.clip_library.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=10)
     
     def _on_timeline_clip_select(self, clip):
         """Handle clip selection in timeline."""
@@ -644,6 +653,24 @@ class PiperAutomationUI:
             self.logger.info(f"Timeline clip selected: {clip.name}")
         else:
             self.logger.info("Timeline clip deselected")
+    
+    def _on_library_add_clip(self, clip):
+        """Handle adding clip from library to timeline."""
+        # Position clip at end of timeline
+        clip.start_time = self.timeline_panel.timeline.total_duration
+        
+        # Add to timeline
+        self.timeline_panel.add_clip(clip)
+        
+        self.logger.info(f"Added clip from library: {clip.name}")
+        
+        # Show success message
+        messagebox.showinfo(
+            "Clip Added",
+            f"Added to timeline:\n{clip.name}\n\n"
+            f"Duration: {clip.duration:.2f}s\n"
+            f"Position: {clip.start_time:.2f}s"
+        )
     
     def _on_timeline_play(self):
         """Handle timeline play button."""
