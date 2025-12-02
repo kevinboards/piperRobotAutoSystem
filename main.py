@@ -24,6 +24,7 @@ from player import PiperPlayer
 from ppr_file_handler import list_recordings, get_recording_info
 from timeline_panel import TimelinePanel
 from timeline import Timeline, TimelineManager
+from timeline_player import TimelinePlayer
 
 # Setup logging
 logging.basicConfig(
@@ -65,6 +66,8 @@ class PiperAutomationUI:
         # V2 Timeline state (create single shared instance)
         self.timeline_manager = TimelineManager()
         self.current_timeline: Optional[Timeline] = None
+        self.timeline_player: Optional[TimelinePlayer] = None
+        self.timeline_playback_task: Optional[asyncio.Task] = None
         
         # Try to connect to robot
         self._init_robot_connection()
@@ -651,24 +654,86 @@ class PiperAutomationUI:
     
     def _on_timeline_play(self):
         """Handle timeline play button."""
-        self.logger.info("Timeline play requested")
-        messagebox.showinfo(
-            "Timeline Playback",
-            "Timeline playback will be implemented in Phase 6!\n\n"
-            "For now, you can:\n"
-            "• Arrange clips on the timeline\n"
-            "• Save/load timeline projects\n"
-            "• Adjust clip positions\n"
-            "• Use zoom controls"
+        if not self.piper:
+            messagebox.showerror(
+                "No Robot Connection",
+                "Cannot play timeline: No robot connected.\n\n"
+                "Please ensure the Piper robot is connected."
+            )
+            return
+        
+        # Get timeline from panel
+        timeline = self.timeline_panel.timeline
+        
+        if not timeline.enabled_clips:
+            messagebox.showwarning(
+                "Empty Timeline",
+                "Cannot play: Timeline has no clips.\n\n"
+                "Add recordings to the timeline first."
+            )
+            return
+        
+        # Validate timeline
+        is_valid, warnings = timeline.validate()
+        if not is_valid:
+            response = messagebox.askyesno(
+                "Timeline Warnings",
+                f"Timeline has warnings:\n\n" + "\n".join(f"• {w}" for w in warnings[:5]) +
+                "\n\nContinue anyway?"
+            )
+            if not response:
+                return
+        
+        self.logger.info("Starting timeline playback")
+        
+        # Create timeline player
+        self.timeline_player = TimelinePlayer(
+            self.piper,
+            timeline,
+            on_progress=self._on_timeline_progress,
+            on_complete=self._on_timeline_complete
         )
+        
+        # Start playback in async task
+        try:
+            playhead_pos = self.timeline_panel.get_playhead_position()
+            self.timeline_playback_task = asyncio.create_task(
+                self.timeline_player.play(start_position=playhead_pos)
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to start timeline playback: {e}")
+            messagebox.showerror("Playback Error", f"Failed to start playback:\n{e}")
     
     def _on_timeline_pause(self):
         """Handle timeline pause button."""
-        self.logger.info("Timeline pause requested")
+        if self.timeline_player:
+            if self.timeline_player.is_paused:
+                self.timeline_player.resume()
+                self.logger.info("Timeline playback resumed")
+            else:
+                self.timeline_player.pause()
+                self.logger.info("Timeline playback paused")
     
     def _on_timeline_stop(self):
         """Handle timeline stop button."""
-        self.logger.info("Timeline stop requested")
+        if self.timeline_player:
+            self.timeline_player.stop()
+            self.timeline_panel.set_playhead_position(0.0)
+            self.logger.info("Timeline playback stopped")
+    
+    def _on_timeline_progress(self, position: float, clip_name: str):
+        """Handle timeline playback progress update."""
+        # Update playhead position on timeline
+        self.timeline_panel.set_playhead_position(position)
+    
+    def _on_timeline_complete(self):
+        """Handle timeline playback completion."""
+        self.logger.info("Timeline playback completed")
+        self.timeline_panel.set_playhead_position(0.0)
+        messagebox.showinfo(
+            "Playback Complete",
+            "Timeline playback finished successfully!"
+        )
 
 
 def main():
