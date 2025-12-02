@@ -67,12 +67,11 @@ class PiperAutomationUI:
         self.timeline_manager = TimelineManager()
         self.current_timeline: Optional[Timeline] = None
         
-        # Setup UI FIRST (before robot connection)
-        self._setup_ui()
+        # Try to connect to robot
+        self._init_robot_connection()
         
-        # Delay robot connection to avoid conflicts
-        # Connect after UI is fully initialized
-        self.root.after(500, self._init_robot_connection)
+        # Setup UI
+        self._setup_ui()
         
         # Start status update loop
         self.root.after(100, self._update_status_loop)

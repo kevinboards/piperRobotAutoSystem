@@ -61,7 +61,10 @@ class ClipLibrary(ttk.Frame):
         self.selected_recording: Optional[Dict[str, Any]] = None
         
         self._build_ui()
-        self._load_recordings()
+        
+        # Delay loading recordings to avoid initialization conflicts
+        # Load after a short delay to let everything initialize
+        self.after(100, self._load_recordings)
     
     def _build_ui(self):
         """Build the library UI."""
