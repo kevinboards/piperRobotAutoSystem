@@ -22,6 +22,8 @@ except ImportError:
 from recorder import PiperRecorder
 from player import PiperPlayer
 from ppr_file_handler import list_recordings, get_recording_info
+from timeline_panel import TimelinePanel
+from timeline import Timeline, TimelineManager
 
 # Setup logging
 logging.basicConfig(
@@ -44,8 +46,8 @@ class PiperAutomationUI:
             root: The main tkinter window
         """
         self.root = root
-        self.root.title("Piper Robot Automation System")
-        self.root.geometry("700x500")
+        self.root.title("Piper Robot Automation System V2")
+        self.root.geometry("1200x700")
         self.root.resizable(True, True)
         
         # Initialize Piper SDK
@@ -59,6 +61,10 @@ class PiperAutomationUI:
         self.is_playing = False
         self.loaded_file_path: Optional[Path] = None
         self.file_duration: float = 0.0
+        
+        # V2 Timeline state
+        self.timeline_manager = TimelineManager()
+        self.current_timeline: Optional[Timeline] = None
         
         # Try to connect to robot
         self._init_robot_connection()
@@ -96,21 +102,38 @@ class PiperAutomationUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         
-        # Main container
-        main_frame = ttk.Frame(self.root, padding="20")
-        main_frame.grid(row=0, column=0, sticky="nsew")
-        main_frame.columnconfigure(0, weight=1)
+        # Create notebook (tabbed interface)
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        
+        # Tab 1: V1 Record/Playback (existing functionality)
+        v1_frame = ttk.Frame(self.notebook, padding="20")
+        self.notebook.add(v1_frame, text="Record & Playback (V1)")
+        
+        # Tab 2: V2 Timeline Editor
+        v2_frame = ttk.Frame(self.notebook)
+        self.notebook.add(v2_frame, text="Timeline Editor (V2)")
+        
+        # Setup V1 tab
+        self._setup_v1_tab(v1_frame)
+        
+        # Setup V2 tab
+        self._setup_v2_tab(v2_frame)
+    
+    def _setup_v1_tab(self, parent):
+        """Setup the V1 record/playback tab."""
+        parent.columnconfigure(0, weight=1)
         
         # Title
         title_label = ttk.Label(
-            main_frame,
-            text="Piper Robot Automation System",
+            parent,
+            text="Record & Playback",
             font=("Segoe UI", 16, "bold")
         )
         title_label.grid(row=0, column=0, pady=(0, 20))
         
         # Button container
-        button_frame = ttk.Frame(main_frame)
+        button_frame = ttk.Frame(parent)
         button_frame.grid(row=1, column=0, pady=10)
         button_frame.columnconfigure(0, weight=1)
         button_frame.columnconfigure(1, weight=1)
@@ -146,7 +169,7 @@ class PiperAutomationUI:
         
         # File info container
         info_frame = ttk.LabelFrame(
-            main_frame,
+            parent,
             text="Loaded File Information",
             padding="15"
         )
@@ -187,7 +210,7 @@ class PiperAutomationUI:
         samples_label.grid(row=2, column=1, sticky="w", padx=(10, 0), pady=5)
         
         # Progress bar
-        progress_frame = ttk.LabelFrame(main_frame, text="Progress", padding="10")
+        progress_frame = ttk.LabelFrame(parent, text="Progress", padding="10")
         progress_frame.grid(row=3, column=0, pady=20, sticky="ew")
         
         self.progress_var = tk.DoubleVar(value=0.0)
@@ -209,7 +232,7 @@ class PiperAutomationUI:
         progress_label.pack()
         
         # Playback speed control (V2: Extended to 4x)
-        speed_frame = ttk.LabelFrame(main_frame, text="Playback Speed (V2)", padding="10")
+        speed_frame = ttk.LabelFrame(parent, text="Playback Speed (V2)", padding="10")
         speed_frame.grid(row=4, column=0, pady=10, sticky="ew")
         
         # Speed slider
@@ -264,7 +287,7 @@ class PiperAutomationUI:
             btn.pack(side='left', padx=2)
         
         # Status bar
-        status_frame = ttk.Frame(main_frame)
+        status_frame = ttk.Frame(parent)
         status_frame.grid(row=5, column=0, pady=(20, 0), sticky="ew")
         
         self.status_var = tk.StringVar(value="Ready")
@@ -597,6 +620,51 @@ class PiperAutomationUI:
         finally:
             # Schedule next update
             self.root.after(100, self._update_status_loop)
+
+
+    def _setup_v2_tab(self, parent):
+        """Setup the V2 timeline editor tab."""
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(0, weight=1)
+        
+        # Create timeline panel
+        self.timeline_panel = TimelinePanel(
+            parent,
+            timeline=self.current_timeline or Timeline(name="New Timeline"),
+            on_clip_select=self._on_timeline_clip_select,
+            on_play=self._on_timeline_play,
+            on_pause=self._on_timeline_pause,
+            on_stop=self._on_timeline_stop
+        )
+        self.timeline_panel.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+    
+    def _on_timeline_clip_select(self, clip):
+        """Handle clip selection in timeline."""
+        if clip:
+            self.logger.info(f"Timeline clip selected: {clip.name}")
+        else:
+            self.logger.info("Timeline clip deselected")
+    
+    def _on_timeline_play(self):
+        """Handle timeline play button."""
+        self.logger.info("Timeline play requested")
+        messagebox.showinfo(
+            "Timeline Playback",
+            "Timeline playback will be implemented in Phase 6!\n\n"
+            "For now, you can:\n"
+            "• Arrange clips on the timeline\n"
+            "• Save/load timeline projects\n"
+            "• Adjust clip positions\n"
+            "• Use zoom controls"
+        )
+    
+    def _on_timeline_pause(self):
+        """Handle timeline pause button."""
+        self.logger.info("Timeline pause requested")
+    
+    def _on_timeline_stop(self):
+        """Handle timeline stop button."""
+        self.logger.info("Timeline stop requested")
 
 
 def main():

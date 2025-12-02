@@ -375,8 +375,7 @@ def demo_timeline_panel():
     root.geometry("1000x300")
     
     # Create sample timeline
-    from timeline import TimelineClip
-    from clip_editor import get_clip_color
+    from timeline import TimelineClip, get_clip_color
     import uuid
     
     timeline = Timeline(name="Demo Timeline")
