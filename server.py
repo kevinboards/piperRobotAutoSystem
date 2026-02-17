@@ -518,8 +518,11 @@ class PiperServer:
             logger.info("Preparing robot for playback...")
             self._prepare_robot_for_playback()
             
+            logger.info(f"Entering node loop. is_playing={self.is_playing}, _node_playback_active={self._node_playback_active}")
+            
             for node in nodes:
                 if not self.is_playing:
+                    logger.warning(f"Breaking out of node loop because is_playing={self.is_playing}")
                     break
 
                 node_id = node.get("id", "")
