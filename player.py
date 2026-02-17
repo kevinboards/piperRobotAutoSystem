@@ -143,14 +143,20 @@ class PiperPlayer:
             raise RuntimeError("Playback already in progress")
         
         # Verify robot is enabled and prepare for playback
+        # Per SLAVE_MODE_FIX.md: MasterSlaveConfig -> ResetRobot -> EnablePiper -> GripperCtrl
         if init_robot:
             try:
-                # Set to slave mode (ready to receive commands)
+                # Step 1: Set to slave mode (ready to receive commands)
                 self.logger.info("Setting robot to slave mode...")
                 self.piper.MasterSlaveConfig(0xFC, 0, 0, 0)
                 time.sleep(0.2)
                 
-                # Enable the robot (critical!)
+                # Step 2: Reset robot (critical! clears previous mode state)
+                self.logger.info("Resetting robot...")
+                self.piper.ResetRobot()
+                time.sleep(0.5)
+                
+                # Step 3: Enable the robot (critical!)
                 self.logger.info("Enabling robot...")
                 enable_attempts = 0
                 max_attempts = 100
@@ -163,7 +169,7 @@ class PiperPlayer:
                 self.logger.info("Robot enabled successfully")
                 time.sleep(0.1)
                 
-                # Initialize gripper if requested
+                # Step 4: Initialize gripper if requested
                 if init_gripper:
                     self._init_gripper()
                 

@@ -610,19 +610,30 @@ class PiperServer:
 
     def _prepare_robot_for_playback(self):
         """
-        Initialize robot for playback: set mode, enable, and prepare gripper.
+        Initialize robot for playback: set mode, reset, enable, and prepare gripper.
         Called once before playing a sequence of nodes.
+        
+        Per SLAVE_MODE_FIX.md, the correct sequence is:
+        1. MasterSlaveConfig (set to slave mode)
+        2. ResetRobot (clear previous state)
+        3. EnablePiper (enable the robot)
+        4. GripperCtrl (initialize gripper)
         """
         if not self.piper:
             raise RuntimeError("Robot not connected")
         
-        # Set to slave mode (ready to receive commands)
-        logger.info("Setting robot to slave mode...")
+        # Step 1: Set to slave mode (ready to receive commands)
+        logger.info("Step 1: Setting robot to slave mode...")
         self.piper.MasterSlaveConfig(0xFC, 0, 0, 0)
         time.sleep(0.2)
         
-        # Enable the robot
-        logger.info("Enabling robot...")
+        # Step 2: Reset robot (critical! clears previous mode state)
+        logger.info("Step 2: Resetting robot...")
+        self.piper.ResetRobot()
+        time.sleep(0.5)
+        
+        # Step 3: Enable the robot
+        logger.info("Step 3: Enabling robot...")
         enable_attempts = 0
         max_attempts = 100
         while not self.piper.EnablePiper():
@@ -634,8 +645,8 @@ class PiperServer:
         logger.info(f"Robot enabled after {enable_attempts} attempts")
         time.sleep(0.1)
         
-        # Initialize gripper
-        logger.info("Initializing gripper...")
+        # Step 4: Initialize gripper
+        logger.info("Step 4: Initializing gripper...")
         try:
             # Clear errors and disable
             self.piper.GripperCtrl(0, 1000, 0x02, 0)
