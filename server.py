@@ -369,7 +369,12 @@ class PiperServer:
             await self.broadcast({"type": "log", "level": "info", "message": "Playback resumed"})
 
     async def _handle_play_timeline(self, ws, msg):
-        """Play a timeline (list of clips with timing)."""
+        """
+        Play recordings from the node editor canvas.
+        
+        Accepts node editor format: { nodes: [...], connections: [...] }
+        Nodes on canvas are played in order determined by their connections.
+        """
         if not self.piper:
             await self.send(ws, {"type": "error", "message": "Robot not connected"})
             return
@@ -384,10 +389,19 @@ class PiperServer:
             await self.send(ws, {"type": "error", "message": "No timeline data provided"})
             return
 
-        # Build Timeline from JSON
-        timeline = Timeline.from_dict(timeline_data)
-        if not timeline.enabled_clips:
-            await self.send(ws, {"type": "error", "message": "Timeline has no enabled clips"})
+        # Handle node editor format: { nodes: [...], connections: [...] }
+        nodes = timeline_data.get("nodes", [])
+        connections = timeline_data.get("connections", [])
+
+        if not nodes:
+            await self.send(ws, {"type": "error", "message": "No recordings on canvas"})
+            return
+
+        # Determine execution order from connections (topological sort)
+        execution_order = self._get_node_execution_order(nodes, connections)
+        
+        if not execution_order:
+            await self.send(ws, {"type": "error", "message": "No recordings to play"})
             return
 
         loop = asyncio.get_event_loop()
@@ -398,18 +412,154 @@ class PiperServer:
             )
             self.is_playing = False
 
-        self.timeline_player = TimelinePlayer(
-            self.piper, timeline, global_speed=speed,
-            on_complete=on_complete,
-        )
+        def on_node_start(node_id):
+            asyncio.run_coroutine_threadsafe(
+                self.broadcast({"type": "playback_progress", "current_node": node_id, "status": "playing"}), loop
+            )
+
         self.is_playing = True
 
-        # Run in background thread (TimelinePlayer.play_sync is blocking)
-        thread = threading.Thread(target=self.timeline_player.play_sync, daemon=True)
+        # Run node playback in background thread
+        thread = threading.Thread(
+            target=self._play_nodes_sync,
+            args=(execution_order, speed, on_complete, on_node_start),
+            daemon=True
+        )
         thread.start()
 
-        await self.broadcast({"type": "log", "level": "info", "message": f"Timeline playback started at {speed}x"})
+        await self.broadcast({"type": "log", "level": "info", "message": f"Playback started at {speed}x ({len(execution_order)} recordings)"})
         await self.broadcast(self._build_status())
+
+    def _get_node_execution_order(self, nodes: list, connections: list) -> list:
+        """
+        Determine the order to play nodes based on their connections.
+        
+        Uses topological sort: nodes with no incoming connections first,
+        then follow the connection chain.
+        
+        Args:
+            nodes: List of node dictionaries from canvas
+            connections: List of connection dictionaries
+            
+        Returns:
+            List of nodes in execution order
+        """
+        if not nodes:
+            return []
+
+        # Build adjacency info
+        node_map = {n["id"]: n for n in nodes}
+        incoming = {n["id"]: [] for n in nodes}
+        outgoing = {n["id"]: [] for n in nodes}
+
+        for conn in connections:
+            from_id = conn.get("fromNode")
+            to_id = conn.get("toNode")
+            if from_id in node_map and to_id in node_map:
+                incoming[to_id].append(from_id)
+                outgoing[from_id].append(to_id)
+
+        # Find starting nodes (no incoming connections)
+        start_nodes = [n["id"] for n in nodes if not incoming[n["id"]]]
+
+        # If no explicit start nodes, sort by x position (leftmost first)
+        if not start_nodes:
+            start_nodes = [sorted(nodes, key=lambda n: n.get("x", 0))[0]["id"]]
+
+        # Topological sort using BFS
+        result = []
+        visited = set()
+        queue = list(start_nodes)
+
+        while queue:
+            node_id = queue.pop(0)
+            if node_id in visited:
+                continue
+            visited.add(node_id)
+            result.append(node_map[node_id])
+
+            # Add connected nodes to queue
+            for next_id in outgoing.get(node_id, []):
+                if next_id not in visited:
+                    # Only add if all predecessors have been visited
+                    all_preds_visited = all(pred in visited for pred in incoming[next_id])
+                    if all_preds_visited:
+                        queue.append(next_id)
+
+        # Add any remaining unvisited nodes (disconnected nodes)
+        for node in nodes:
+            if node["id"] not in visited:
+                result.append(node)
+
+        return result
+
+    def _play_nodes_sync(self, nodes: list, global_speed: float, on_complete, on_node_start):
+        """
+        Play a sequence of nodes synchronously (runs in background thread).
+        
+        Args:
+            nodes: List of nodes in execution order
+            global_speed: Global speed multiplier
+            on_complete: Callback when playback finishes
+            on_node_start: Callback when starting a node (passes node_id)
+        """
+        try:
+            for node in nodes:
+                if not self.is_playing:
+                    break
+
+                node_id = node.get("id", "")
+                recording_name = node.get("recordingName", "")
+                node_speed = float(node.get("speed", 1.0))
+                delay_after = float(node.get("delayAfter", 0))
+
+                if not recording_name:
+                    logger.warning(f"Node {node_id} has no recording name, skipping")
+                    continue
+
+                # Notify which node is playing
+                if on_node_start:
+                    on_node_start(node_id)
+
+                # Calculate effective speed
+                effective_speed = node_speed * global_speed
+                logger.info(f"Playing node {node_id}: {recording_name} at {effective_speed}x")
+
+                # Build recording path
+                filepath = Path("recordings") / recording_name
+                if not filepath.exists():
+                    logger.error(f"Recording not found: {filepath}")
+                    continue
+
+                # Play using PiperPlayer
+                player = PiperPlayer(self.piper)
+                player.load_recording(str(filepath))
+                player.set_speed(effective_speed)
+                player.start_playback()
+
+                # Wait for playback to complete
+                while player.is_playing():
+                    if not self.is_playing:
+                        player.stop()
+                        break
+                    time.sleep(0.05)
+
+                # Apply delay after this node (if any)
+                if delay_after > 0 and self.is_playing:
+                    logger.info(f"Delay after {recording_name}: {delay_after}s")
+                    time.sleep(delay_after / global_speed)
+
+            logger.info("Node playback sequence completed")
+
+        except Exception as e:
+            logger.error(f"Error during node playback: {e}")
+            import traceback
+            traceback.print_exc()
+
+        finally:
+            self.is_playing = False
+            if on_complete:
+                on_complete()
 
     async def _handle_save_timeline(self, ws, msg):
         name = msg.get("name", "")
