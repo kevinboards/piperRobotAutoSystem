@@ -129,6 +129,7 @@ class PiperServer:
 
         self.is_recording = False
         self.is_playing = False
+        self._node_playback_active = False  # Track node-based playback separately
         self._status_task: Optional[asyncio.Task] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -198,7 +199,10 @@ class PiperServer:
                         "rate": round(stats.get("current_rate", 0), 1),
                     })
                 elif self.is_playing:
-                    if self.player and self.player.is_playing():
+                    if self._node_playback_active:
+                        # Node-based playback manages its own state - don't interfere
+                        pass
+                    elif self.player and self.player.is_playing():
                         info = self.player.get_playback_info()
                         await self.broadcast({
                             "type": "playback_progress",
@@ -217,7 +221,7 @@ class PiperServer:
                             "status": "playing",
                         })
                     else:
-                        # Playback finished
+                        # Playback finished (only for legacy player/timeline_player modes)
                         self.is_playing = False
                         await self.broadcast({"type": "timeline_complete"})
             except Exception as e:
@@ -355,6 +359,7 @@ class PiperServer:
         if self.timeline_player and self.timeline_player.is_playing:
             self.timeline_player.stop()
         self.is_playing = False
+        self._node_playback_active = False  # Also stop node-based playback
         await self.broadcast({"type": "log", "level": "info", "message": "Playback stopped"})
         await self.broadcast(self._build_status())
 
@@ -418,6 +423,7 @@ class PiperServer:
             )
 
         self.is_playing = True
+        self._node_playback_active = True  # Prevent status loop from interfering
 
         # Run node playback in background thread
         thread = threading.Thread(
@@ -595,6 +601,7 @@ class PiperServer:
 
         finally:
             self.is_playing = False
+            self._node_playback_active = False  # Allow status loop to manage state again
             if on_complete:
                 on_complete()
 
