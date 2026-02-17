@@ -48,6 +48,7 @@
                             <div class="joint"><span class="joint-label">J5</span><span class="joint-value" id="j4">--</span></div>
                             <div class="joint"><span class="joint-label">J6</span><span class="joint-value" id="j5">--</span></div>
                         </div>
+                        <button id="reset-robot-btn" class="btn btn-reset">&#8635; Reset Robot</button>
                     </div>
                 </section>
 
@@ -151,6 +152,24 @@
                 <div id="timelines-list" class="timelines-list">
                     <p class="waiting-message">Loading...</p>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reset Robot Confirmation Modal -->
+    <div id="reset-modal" class="modal" style="display:none;">
+        <div class="modal-content modal-content-sm">
+            <div class="modal-header modal-header-warning">
+                <h3>&#9888; Reset Robot</h3>
+            </div>
+            <div class="modal-body">
+                <p class="reset-modal-text">This will send a reset command to the robot arm, then re-activate the CAN bus and re-enable the arm.</p>
+                <p class="reset-modal-text"><strong>Ensure the area around the robot is clear before proceeding.</strong></p>
+                <p class="reset-modal-question">Are you ready to reset the robot?</p>
+            </div>
+            <div class="modal-footer">
+                <button id="reset-confirm-btn" class="btn btn-reset-confirm">Yes, Reset Robot</button>
+                <button id="reset-cancel-btn" class="btn btn-cancel">Cancel</button>
             </div>
         </div>
     </div>

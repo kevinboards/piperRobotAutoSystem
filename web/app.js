@@ -72,7 +72,11 @@ const el = {
     logOutput: document.getElementById('log-output'),
     timelinesModal: document.getElementById('timelines-modal'),
     timelinesList: document.getElementById('timelines-list'),
-    modalCloseBtn: document.getElementById('modal-close-btn')
+    modalCloseBtn: document.getElementById('modal-close-btn'),
+    resetRobotBtn: document.getElementById('reset-robot-btn'),
+    resetModal: document.getElementById('reset-modal'),
+    resetConfirmBtn: document.getElementById('reset-confirm-btn'),
+    resetCancelBtn: document.getElementById('reset-cancel-btn')
 };
 
 // ============================================================
@@ -166,6 +170,9 @@ function handleServerMessage(data) {
             break;
         case 'timeline_loaded':
             handleTimelineLoaded(data);
+            break;
+        case 'reset_complete':
+            handleResetComplete(data);
             break;
         case 'error':
             log(`Server error: ${data.message}`, 'error');
@@ -1026,6 +1033,50 @@ function escapeHtml(str) {
     div.textContent = str;
     return div.innerHTML;
 }
+
+// ============================================================
+// Reset Robot
+// ============================================================
+function openResetModal() {
+    el.resetModal.style.display = 'flex';
+    el.resetConfirmBtn.disabled = false;
+    el.resetCancelBtn.disabled = false;
+}
+
+function closeResetModal() {
+    el.resetModal.style.display = 'none';
+}
+
+function confirmReset() {
+    closeResetModal();
+    el.resetRobotBtn.disabled = true;
+    el.resetRobotBtn.textContent = '⟳ Resetting...';
+    updateExecutionStatus('Resetting...', '#b08800');
+    log('Robot reset requested by user', 'warning');
+    wsSend({ type: 'reset_robot' });
+}
+
+function handleResetComplete(data) {
+    el.resetRobotBtn.disabled = false;
+    el.resetRobotBtn.innerHTML = '&#8635; Reset Robot';
+    if (data.success) {
+        updateExecutionStatus('Ready', '#238636');
+        // Refresh status from server
+        wsSend({ type: 'get_status' });
+    } else {
+        updateExecutionStatus('Reset failed', '#da3633');
+        log(`Reset failed: ${data.message || 'Unknown error'}`, 'error');
+    }
+}
+
+el.resetRobotBtn.addEventListener('click', openResetModal);
+el.resetConfirmBtn.addEventListener('click', confirmReset);
+el.resetCancelBtn.addEventListener('click', closeResetModal);
+
+// Close reset modal on backdrop click
+el.resetModal.addEventListener('click', (e) => {
+    if (e.target === el.resetModal) closeResetModal();
+});
 
 // ============================================================
 // Initialize

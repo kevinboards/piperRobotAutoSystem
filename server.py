@@ -261,6 +261,7 @@ class PiperServer:
             "load_timeline": self._handle_load_timeline,
             "list_timelines": self._handle_list_timelines,
             "delete_recording": self._handle_delete_recording,
+            "reset_robot": self._handle_reset_robot,
         }.get(msg_type)
 
         if handler:
@@ -697,6 +698,105 @@ class PiperServer:
             return
         filepath.unlink()
         await self.broadcast({"type": "log", "level": "info", "message": f"Deleted recording: {name}"})
+
+    async def _handle_reset_robot(self, ws, msg):
+        """
+        Reset the robot arm, then re-activate CAN bus and re-enable the arm.
+        Mirrors the sequence in piper_ctrl_reset.py + can_activate.sh + piper_ctrl_enable.py.
+        """
+        await self.broadcast({"type": "log", "level": "warning", "message": "Robot reset initiated..."})
+
+        loop = asyncio.get_event_loop()
+
+        def do_reset():
+            try:
+                # Step 1: Send reset command (mirrors piper_ctrl_reset.py)
+                if self.piper:
+                    logger.info("Sending reset command to robot arm...")
+                    asyncio.run_coroutine_threadsafe(
+                        self.broadcast({"type": "log", "level": "info", "message": "Step 1/3: Sending reset command..."}),
+                        loop
+                    )
+                    self.piper.MotionCtrl_1(0x02, 0, 0)  # Resume/reset
+                    self.piper.MotionCtrl_2(0, 0, 0, 0x00)  # Position-velocity mode
+                    time.sleep(0.5)
+                else:
+                    logger.warning("Robot not connected — skipping SDK reset command")
+                    asyncio.run_coroutine_threadsafe(
+                        self.broadcast({"type": "log", "level": "warning", "message": "Step 1/3: Robot not connected — skipping SDK reset"}),
+                        loop
+                    )
+
+                # Step 2: Re-activate CAN bus (mirrors can_activate.sh)
+                asyncio.run_coroutine_threadsafe(
+                    self.broadcast({"type": "log", "level": "info", "message": "Step 2/3: Re-activating CAN bus..."}),
+                    loop
+                )
+                can_ok = activate_can_bus()
+                if can_ok:
+                    asyncio.run_coroutine_threadsafe(
+                        self.broadcast({"type": "log", "level": "success", "message": "CAN bus re-activated successfully"}),
+                        loop
+                    )
+                else:
+                    asyncio.run_coroutine_threadsafe(
+                        self.broadcast({"type": "log", "level": "warning", "message": "CAN bus activation skipped (demo mode or failed)"}),
+                        loop
+                    )
+
+                # Step 3: Re-enable robot arm (mirrors piper_ctrl_enable.py)
+                asyncio.run_coroutine_threadsafe(
+                    self.broadcast({"type": "log", "level": "info", "message": "Step 3/3: Re-enabling robot arm..."}),
+                    loop
+                )
+                if self.piper:
+                    enabled = False
+                    for attempt in range(200):
+                        if self.piper.EnablePiper():
+                            enabled = True
+                            logger.info(f"Robot re-enabled after reset (attempt {attempt + 1})")
+                            break
+                        time.sleep(0.01)
+
+                    if enabled:
+                        asyncio.run_coroutine_threadsafe(
+                            self.broadcast({"type": "log", "level": "success", "message": "Robot arm re-enabled successfully"}),
+                            loop
+                        )
+                    else:
+                        asyncio.run_coroutine_threadsafe(
+                            self.broadcast({"type": "log", "level": "warning", "message": "EnablePiper() did not confirm — continuing anyway"}),
+                            loop
+                        )
+                else:
+                    asyncio.run_coroutine_threadsafe(
+                        self.broadcast({"type": "log", "level": "warning", "message": "Step 3/3: Robot not connected — skipping enable"}),
+                        loop
+                    )
+
+                # Broadcast updated status
+                asyncio.run_coroutine_threadsafe(
+                    self.broadcast({"type": "reset_complete", "success": True}),
+                    loop
+                )
+                asyncio.run_coroutine_threadsafe(
+                    self.broadcast({"type": "log", "level": "success", "message": "Robot reset complete"}),
+                    loop
+                )
+
+            except Exception as e:
+                logger.error(f"Robot reset failed: {e}")
+                asyncio.run_coroutine_threadsafe(
+                    self.broadcast({"type": "reset_complete", "success": False, "message": str(e)}),
+                    loop
+                )
+                asyncio.run_coroutine_threadsafe(
+                    self.broadcast({"type": "log", "level": "error", "message": f"Robot reset failed: {e}"}),
+                    loop
+                )
+
+        thread = threading.Thread(target=do_reset, daemon=True)
+        thread.start()
 
     # -- WebSocket handler --------------------------------------------------
 
