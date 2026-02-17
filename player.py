@@ -123,13 +123,15 @@ class PiperPlayer:
             raise
     
     def start_playback(self, speed_multiplier: float = DEFAULT_SPEED_MULTIPLIER, 
-                      init_gripper: bool = True) -> None:
+                      init_gripper: bool = True, init_robot: bool = True) -> None:
         """
         Start playing back the loaded recording.
         
         Args:
             speed_multiplier: Playback speed multiplier (0.5 = half speed, 2.0 = double speed)
             init_gripper: If True, initializes gripper before playback (recommended)
+            init_robot: If True, enables robot and sets slave mode before playback.
+                       Set to False if robot is already prepared (e.g., playing multiple recordings).
             
         Raises:
             RuntimeError: If no recording is loaded or already playing
@@ -141,32 +143,33 @@ class PiperPlayer:
             raise RuntimeError("Playback already in progress")
         
         # Verify robot is enabled and prepare for playback
-        try:
-            # Set to slave mode (ready to receive commands)
-            self.logger.info("Setting robot to slave mode...")
-            self.piper.MasterSlaveConfig(0xFC, 0, 0, 0)
-            time.sleep(0.2)
-            
-            # Enable the robot (critical!)
-            self.logger.info("Enabling robot...")
-            enable_attempts = 0
-            max_attempts = 100
-            while not self.piper.EnablePiper():
-                time.sleep(0.01)
-                enable_attempts += 1
-                if enable_attempts >= max_attempts:
-                    raise RuntimeError("Failed to enable robot after 100 attempts")
-            
-            self.logger.info("Robot enabled successfully")
-            time.sleep(0.1)
-            
-            # Initialize gripper if requested
-            if init_gripper:
-                self._init_gripper()
-            
-        except Exception as e:
-            self.logger.error(f"Failed to prepare robot: {e}")
-            raise RuntimeError("Failed to prepare robot for playback. Is it connected and enabled?")
+        if init_robot:
+            try:
+                # Set to slave mode (ready to receive commands)
+                self.logger.info("Setting robot to slave mode...")
+                self.piper.MasterSlaveConfig(0xFC, 0, 0, 0)
+                time.sleep(0.2)
+                
+                # Enable the robot (critical!)
+                self.logger.info("Enabling robot...")
+                enable_attempts = 0
+                max_attempts = 100
+                while not self.piper.EnablePiper():
+                    time.sleep(0.01)
+                    enable_attempts += 1
+                    if enable_attempts >= max_attempts:
+                        raise RuntimeError("Failed to enable robot after 100 attempts")
+                
+                self.logger.info("Robot enabled successfully")
+                time.sleep(0.1)
+                
+                # Initialize gripper if requested
+                if init_gripper:
+                    self._init_gripper()
+                
+            except Exception as e:
+                self.logger.error(f"Failed to prepare robot: {e}")
+                raise RuntimeError("Failed to prepare robot for playback. Is it connected and enabled?")
         
         self._speed_multiplier = speed_multiplier
         self._current_index = 0

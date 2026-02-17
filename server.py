@@ -503,7 +503,15 @@ class PiperServer:
             on_complete: Callback when playback finishes
             on_node_start: Callback when starting a node (passes node_id)
         """
+        logger.info(f"=== Starting playback sequence: {len(nodes)} nodes at {global_speed}x speed ===")
+        for i, n in enumerate(nodes):
+            logger.info(f"  Node {i}: {n.get('recordingName', 'unnamed')} (speed={n.get('speed', 1.0)})")
+        
         try:
+            # Initialize robot once before playing all nodes
+            logger.info("Preparing robot for playback...")
+            self._prepare_robot_for_playback()
+            
             for node in nodes:
                 if not self.is_playing:
                     break
@@ -525,24 +533,47 @@ class PiperServer:
                 effective_speed = node_speed * global_speed
                 logger.info(f"Playing node {node_id}: {recording_name} at {effective_speed}x")
 
-                # Build recording path
-                filepath = Path("recordings") / recording_name
+                # Build recording path (relative to server location)
+                server_dir = Path(__file__).parent
+                filepath = server_dir / "recordings" / recording_name
+                
                 if not filepath.exists():
                     logger.error(f"Recording not found: {filepath}")
+                    logger.error(f"  Server dir: {server_dir}")
+                    logger.error(f"  Recording name: {recording_name}")
                     continue
 
                 # Play using PiperPlayer
                 player = PiperPlayer(self.piper)
-                player.load_recording(str(filepath))
-                player.set_speed(effective_speed)
-                player.start_playback()
+                
+                try:
+                    info = player.load_recording(str(filepath))
+                    logger.info(f"Loaded recording: {info.get('sample_count', 0)} samples, {info.get('duration_sec', 0):.1f}s")
+                except Exception as load_err:
+                    logger.error(f"Failed to load recording {recording_name}: {load_err}")
+                    continue
+                
+                # Pass speed directly to start_playback (don't use set_speed, it gets overwritten)
+                # Skip robot init since we already did it in _prepare_robot_for_playback()
+                player.start_playback(speed_multiplier=effective_speed, init_gripper=False, init_robot=False)
+                
+                logger.info(f"Playback started for {recording_name}, waiting for completion...")
 
                 # Wait for playback to complete
+                wait_count = 0
                 while player.is_playing():
                     if not self.is_playing:
-                        player.stop()
+                        player.stop_playback()
+                        logger.info("Playback stopped by user")
                         break
                     time.sleep(0.05)
+                    wait_count += 1
+                    # Log progress every ~2 seconds
+                    if wait_count % 40 == 0:
+                        progress = player.get_playback_info()
+                        logger.info(f"  Playing: {progress.get('current_sample', 0)}/{progress.get('total_samples', 0)} samples")
+                
+                logger.info(f"Finished playing {recording_name}")
 
                 # Apply delay after this node (if any)
                 if delay_after > 0 and self.is_playing:
@@ -555,11 +586,58 @@ class PiperServer:
             logger.error(f"Error during node playback: {e}")
             import traceback
             traceback.print_exc()
+            # Broadcast error to clients
+            if self._loop:
+                asyncio.run_coroutine_threadsafe(
+                    self.broadcast({"type": "error", "message": f"Playback error: {e}"}),
+                    self._loop
+                )
 
         finally:
             self.is_playing = False
             if on_complete:
                 on_complete()
+
+    def _prepare_robot_for_playback(self):
+        """
+        Initialize robot for playback: set mode, enable, and prepare gripper.
+        Called once before playing a sequence of nodes.
+        """
+        if not self.piper:
+            raise RuntimeError("Robot not connected")
+        
+        # Set to slave mode (ready to receive commands)
+        logger.info("Setting robot to slave mode...")
+        self.piper.MasterSlaveConfig(0xFC, 0, 0, 0)
+        time.sleep(0.2)
+        
+        # Enable the robot
+        logger.info("Enabling robot...")
+        enable_attempts = 0
+        max_attempts = 100
+        while not self.piper.EnablePiper():
+            time.sleep(0.01)
+            enable_attempts += 1
+            if enable_attempts >= max_attempts:
+                raise RuntimeError("Failed to enable robot after 100 attempts")
+        
+        logger.info(f"Robot enabled after {enable_attempts} attempts")
+        time.sleep(0.1)
+        
+        # Initialize gripper
+        logger.info("Initializing gripper...")
+        try:
+            # Clear errors and disable
+            self.piper.GripperCtrl(0, 1000, 0x02, 0)
+            time.sleep(0.1)
+            # Enable gripper
+            self.piper.GripperCtrl(0, 1000, 0x01, 0)
+            time.sleep(0.1)
+            logger.info("Gripper initialized")
+        except Exception as e:
+            logger.warning(f"Gripper init failed (may be non-critical): {e}")
+        
+        logger.info("Robot ready for playback")
 
     async def _handle_save_timeline(self, ws, msg):
         name = msg.get("name", "")
