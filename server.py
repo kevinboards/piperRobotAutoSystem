@@ -47,6 +47,160 @@ STATUS_UPDATE_HZ = 5
 
 
 # ---------------------------------------------------------------------------
+# Arm State Monitor
+# ---------------------------------------------------------------------------
+
+class ArmState:
+    """Human-readable arm state derived from SDK ctrl_mode + arm_status."""
+    UNKNOWN   = "unknown"
+    STANDBY   = "standby"    # motors locked / disabled — CtrlMode 0x00 or motors disabled
+    TEACHING  = "teaching"   # gravity-comp drag mode  — CtrlMode 0x02
+    EXECUTION = "execution"  # built-in trajectory replay — ArmStatus 0x0C / CtrlMode 0x07
+
+
+class ArmStateMonitor:
+    """
+    Polls GetArmStatus() in a background thread and fires callbacks whenever
+    the derived arm state changes.
+
+    The three states we care about:
+      STANDBY   — arm locked, no recording, no playback (default after enable)
+      TEACHING  — gravity compensation active, user drags arm freely
+      EXECUTION — arm is replaying a teach trajectory internally
+
+    Callbacks registered via on_enter_teaching / on_leave_teaching / on_state_change
+    are called from the monitor thread — keep them short or dispatch to an event loop.
+    """
+
+    POLL_HZ = 20  # how often we read arm status
+
+    def __init__(self, piper):
+        self._piper = piper
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._current_state: str = ArmState.UNKNOWN
+        self._lock = threading.Lock()
+
+        # Callbacks: fn(new_state: str, old_state: str)
+        self._on_state_change = []   # called on any transition
+        self._on_enter_teaching = [] # called when entering TEACHING
+        self._on_leave_teaching = [] # called when leaving TEACHING (→ STANDBY or EXECUTION)
+
+        self.logger = logging.getLogger("ArmStateMonitor")
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def on_state_change(self, fn):
+        """Register fn(new_state, old_state) called on every state transition."""
+        self._on_state_change.append(fn)
+
+    def on_enter_teaching(self, fn):
+        """Register fn() called when arm transitions INTO TEACHING_MODE."""
+        self._on_enter_teaching.append(fn)
+
+    def on_leave_teaching(self, fn):
+        """Register fn(new_state) called when arm transitions OUT of TEACHING_MODE."""
+        self._on_leave_teaching.append(fn)
+
+    @property
+    def state(self) -> str:
+        with self._lock:
+            return self._current_state
+
+    def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._poll_loop, daemon=True, name="ArmStateMonitor")
+        self._thread.start()
+        self.logger.info("ArmStateMonitor started")
+
+    def stop(self):
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=2.0)
+        self.logger.info("ArmStateMonitor stopped")
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _poll_loop(self):
+        interval = 1.0 / self.POLL_HZ
+        while not self._stop_event.is_set():
+            try:
+                new_state = self._read_state()
+                with self._lock:
+                    old_state = self._current_state
+                    changed = new_state != old_state
+                    if changed:
+                        self._current_state = new_state
+
+                if changed:
+                    self.logger.info(f"Arm state: {old_state} → {new_state}")
+                    self._fire(self._on_state_change, new_state, old_state)
+                    if new_state == ArmState.TEACHING:
+                        self._fire(self._on_enter_teaching)
+                    elif old_state == ArmState.TEACHING:
+                        self._fire(self._on_leave_teaching, new_state)
+
+            except Exception as e:
+                self.logger.debug(f"Poll error: {e}")
+
+            self._stop_event.wait(interval)
+
+    def _read_state(self) -> str:
+        """Map SDK status fields to one of our three ArmState values."""
+        try:
+            status = self._piper.GetArmStatus()
+            arm = status.arm_status
+
+            # Try to import the enums; fall back gracefully if SDK layout differs
+            try:
+                from piper_sdk.piper_msgs.msg_v2.feedback.arm_feedback_status import (
+                    ArmMsgFeedbackStatusEnum,
+                )
+                CtrlMode   = ArmMsgFeedbackStatusEnum.CtrlMode
+                ArmStatus  = ArmMsgFeedbackStatusEnum.ArmStatus
+
+                ctrl_mode  = arm.ctrl_mode
+                arm_status = arm.arm_status
+
+                if ctrl_mode == CtrlMode.TEACHING_MODE:
+                    return ArmState.TEACHING
+
+                if (ctrl_mode == CtrlMode.OFFLINE_TRAJECTORY_MODE
+                        or arm_status == ArmStatus.TEACHING_EXECUTION):
+                    return ArmState.EXECUTION
+
+                return ArmState.STANDBY
+
+            except ImportError:
+                # Fallback: use raw integer values from the SDK research
+                ctrl_mode  = int(arm.ctrl_mode)
+                arm_status = int(arm.arm_status)
+
+                if ctrl_mode == 0x02:       # TEACHING_MODE
+                    return ArmState.TEACHING
+                if ctrl_mode == 0x07 or arm_status == 0x0C:  # OFFLINE / TEACHING_EXECUTION
+                    return ArmState.EXECUTION
+                return ArmState.STANDBY
+
+        except Exception:
+            return ArmState.UNKNOWN
+
+    @staticmethod
+    def _fire(callbacks, *args):
+        for fn in callbacks:
+            try:
+                fn(*args)
+            except Exception as e:
+                logging.getLogger("ArmStateMonitor").warning(f"Callback error: {e}")
+
+
+# ---------------------------------------------------------------------------
 # CAN Bus Activation
 # ---------------------------------------------------------------------------
 
@@ -140,11 +294,19 @@ class PiperServer:
         self.timeline_player: Optional[TimelinePlayer] = None
         self.timeline_manager = TimelineManager()
 
-        self.is_recording = False
+        self.is_recording = False   # True while a recording session is open
         self.is_playing = False
         self._node_playback_active = False  # Track node-based playback separately
         self._status_task: Optional[asyncio.Task] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+        # Arm state monitor (started in run() once the event loop exists)
+        self._arm_monitor: Optional[ArmStateMonitor] = None
+        if piper:
+            self._arm_monitor = ArmStateMonitor(piper)
+            self._arm_monitor.on_enter_teaching(self._on_arm_enter_teaching)
+            self._arm_monitor.on_leave_teaching(self._on_arm_leave_teaching)
+            self._arm_monitor.on_state_change(self._on_arm_state_change)
 
     # -- WebSocket broadcast ------------------------------------------------
 
@@ -168,6 +330,64 @@ class PiperServer:
         except Exception:
             pass
 
+    # -- Arm state monitor callbacks (called from monitor thread) -----------
+
+    def _on_arm_state_change(self, new_state: str, old_state: str):
+        """Broadcast every arm state transition to all WebSocket clients."""
+        if self._loop:
+            asyncio.run_coroutine_threadsafe(
+                self.broadcast({
+                    "type": "arm_state",
+                    "state": new_state,
+                    "previous": old_state,
+                }),
+                self._loop,
+            )
+
+    def _on_arm_enter_teaching(self):
+        """
+        Arm entered TEACHING_MODE (gravity comp, free to move).
+
+        If a recording session is open (UI Record button was pressed), resume
+        capture so we start writing samples into the open file.
+        """
+        if self.is_recording and self.recorder:
+            started = self.recorder.resume_capture()
+            if started and self._loop:
+                asyncio.run_coroutine_threadsafe(
+                    self.broadcast({
+                        "type": "log",
+                        "level": "info",
+                        "message": f"Arm in TEACHING mode — recording segment "
+                                   f"{self.recorder.get_recording_stats().get('segment_count', '?')}",
+                    }),
+                    self._loop,
+                )
+
+    def _on_arm_leave_teaching(self, new_state: str):
+        """
+        Arm left TEACHING_MODE (returned to STANDBY or entered EXECUTION).
+
+        If we were capturing, pause capture (flush buffer, keep file open).
+        """
+        if self.is_recording and self.recorder:
+            paused = self.recorder.pause_capture()
+            if paused and self._loop:
+                stats = self.recorder.get_recording_stats()
+                asyncio.run_coroutine_threadsafe(
+                    self.broadcast({
+                        "type": "log",
+                        "level": "info",
+                        "message": (
+                            f"Arm left TEACHING → {new_state} — capture paused "
+                            f"({stats.get('sample_count', 0)} samples total, "
+                            f"{stats.get('segment_count', 0)} segment(s)). "
+                            f"Waiting for next TEACHING segment or stop."
+                        ),
+                    }),
+                    self._loop,
+                )
+
     # -- Status helpers -----------------------------------------------------
 
     def _get_joint_positions(self) -> list:
@@ -188,12 +408,16 @@ class PiperServer:
             return [0.0] * 6
 
     def _build_status(self) -> dict:
+        arm_state = self._arm_monitor.state if self._arm_monitor else ArmState.UNKNOWN
+        capturing = self.recorder.is_capturing() if (self.is_recording and self.recorder) else False
         return {
             "type": "status",
             "connected": self.piper is not None,
             "sdk_available": SDK_AVAILABLE,
-            "recording": self.is_recording,
+            "recording": self.is_recording,   # session open
+            "capturing": capturing,           # actively writing samples now
             "playing": self.is_playing,
+            "arm_state": arm_state,
             "joints": self._get_joint_positions(),
         }
 
@@ -207,9 +431,11 @@ class PiperServer:
                     stats = self.recorder.get_recording_stats()
                     await self.broadcast({
                         "type": "recording_progress",
-                        "samples": stats.get("sample_count", 0),
-                        "duration": round(stats.get("duration_sec", 0), 2),
-                        "rate": round(stats.get("current_rate", 0), 1),
+                        "samples":   stats.get("sample_count", 0),
+                        "segments":  stats.get("segment_count", 0),
+                        "capturing": stats.get("is_capturing", False),
+                        "duration":  round(stats.get("duration_sec", 0), 2),
+                        "rate":      round(stats.get("current_rate", 0), 1),
                     })
                 elif self.is_playing:
                     if self._node_playback_active:
@@ -297,9 +523,33 @@ class PiperServer:
 
         name = msg.get("name")
         self.recorder = PiperRecorder(self.piper, sample_rate=200)
-        filepath = self.recorder.start_recording(filename=name, description="Web recording")
+
+        # Open the session with capture PAUSED — the ArmStateMonitor will call
+        # resume_capture() automatically when the arm enters TEACHING_MODE.
+        # If the arm is already in TEACHING_MODE right now, kick it immediately.
+        filepath = self.recorder.start_recording(
+            filename=name,
+            description="Web recording",
+            start_capturing=False,   # wait for TEACHING_MODE
+        )
         self.is_recording = True
-        await self.broadcast({"type": "log", "level": "info", "message": f"Recording started: {Path(filepath).name}"})
+
+        arm_state = self._arm_monitor.state if self._arm_monitor else ArmState.UNKNOWN
+
+        # If arm is already in teach mode when button is pressed, start capturing now
+        if arm_state == ArmState.TEACHING:
+            self.recorder.resume_capture()
+            status_msg = (
+                f"Recording session open: {Path(filepath).name} "
+                f"— arm already in TEACHING mode, capturing now"
+            )
+        else:
+            status_msg = (
+                f"Recording session open: {Path(filepath).name} "
+                f"— waiting for arm to enter TEACHING mode (currently: {arm_state})"
+            )
+
+        await self.broadcast({"type": "log", "level": "info", "message": status_msg})
         await self.broadcast(self._build_status())
 
     async def _handle_stop_recording(self, ws, msg):
@@ -310,9 +560,17 @@ class PiperServer:
         stats = self.recorder.stop_recording()
         self.is_recording = False
         self.recorder = None
+
+        segs = stats.get("segment_count", 0)
+        seg_word = "segment" if segs == 1 else "segments"
         await self.broadcast({
             "type": "log", "level": "info",
-            "message": f"Recording saved: {stats.get('filename', '?')} ({stats.get('sample_count', 0)} samples, {stats.get('duration_sec', 0):.1f}s)"
+            "message": (
+                f"Recording saved: {stats.get('filename', '?')} — "
+                f"{stats.get('sample_count', 0)} samples across "
+                f"{segs} teaching {seg_word} "
+                f"({stats.get('duration_sec', 0):.1f}s session)"
+            ),
         })
         await self.broadcast(self._build_status())
 
@@ -766,9 +1024,14 @@ class PiperServer:
             await asyncio.Future()  # run forever
 
     async def run(self):
-        """Start HTTP server, WebSocket server, and status loop."""
+        """Start HTTP server, WebSocket server, status loop, and arm monitor."""
         self._loop = asyncio.get_event_loop()
         self._status_task = asyncio.create_task(self._status_loop())
+
+        if self._arm_monitor:
+            self._arm_monitor.start()
+            logger.info("Arm state monitor running")
+
         await asyncio.gather(
             self.start_http_server(),
             self.start_ws_server(),
