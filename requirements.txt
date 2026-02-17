@@ -1,18 +1,9 @@
 # Piper Automation System - Requirements
-# Python 3.8+ required
+# Python 3.8+ required (Linux)
 
-# Core dependency - Piper Robot SDK
-piper_sdk>=0.6.1
-
-# CAN bus communication (required by piper_sdk)
+aiohttp>=3.9.0
+websockets>=12.0
 python-can>=4.3.1
-
-# Type checking support
 typing-extensions>=4.5.0
-
-# Note: tkinter is included with Python standard library
-# If tkinter is missing, install via system package manager:
-#   Ubuntu/Debian: sudo apt-get install python3-tk
-#   Fedora/RHEL: sudo dnf install python3-tkinter
-#   Windows/Mac: Included with Python installer
+# piper_sdk installed from local directory via: pip install -e piper_sdk/
 

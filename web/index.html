@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Piper Automation System</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header>
+            <h1>Piper Automation System</h1>
+            <div class="connection-status">
+                <span class="status-indicator" id="conn-indicator"></span>
+                <span id="conn-label">CAN Bus: Disconnected</span>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <div class="main-container">
+            <!-- Left Sidebar -->
+            <aside class="sidebar" id="sidebar">
+                <!-- Robot Status -->
+                <section class="sidebar-section">
+                    <h2>Robot Status</h2>
+                    <div class="robot-info">
+                        <div class="info-row">
+                            <span class="info-label">Connected:</span>
+                            <span id="robot-connected" class="info-value">No</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Enabled:</span>
+                            <span id="robot-enabled" class="info-value">No</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">State:</span>
+                            <span id="robot-state" class="info-value">Idle</span>
+                        </div>
+                    </div>
+                    <div class="joint-angles">
+                        <h3>Joint Angles</h3>
+                        <div id="joint-display" class="joint-grid">
+                            <div class="joint"><span class="joint-label">J1</span><span class="joint-value" id="j0">--</span></div>
+                            <div class="joint"><span class="joint-label">J2</span><span class="joint-value" id="j1">--</span></div>
+                            <div class="joint"><span class="joint-label">J3</span><span class="joint-value" id="j2">--</span></div>
+                            <div class="joint"><span class="joint-label">J4</span><span class="joint-value" id="j3">--</span></div>
+                            <div class="joint"><span class="joint-label">J5</span><span class="joint-value" id="j4">--</span></div>
+                            <div class="joint"><span class="joint-label">J6</span><span class="joint-value" id="j5">--</span></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Recording Controls -->
+                <section class="sidebar-section">
+                    <h2>Recording</h2>
+                    <div class="recording-controls">
+                        <button id="record-btn" class="btn btn-record">Record</button>
+                        <div id="recording-status" class="recording-status" style="display:none;">
+                            <span class="rec-dot"></span>
+                            <span id="rec-info">Recording...</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Recordings Library -->
+                <section class="sidebar-section">
+                    <h2>Recordings Library</h2>
+                    <button id="refresh-recordings-btn" class="btn btn-small">Refresh</button>
+                    <div id="recordings-list" class="recordings-list">
+                        <p class="waiting-message">Loading recordings...</p>
+                    </div>
+                </section>
+            </aside>
+
+            <!-- Center - Timeline Editor -->
+            <main class="timeline-editor">
+                <!-- Toolbar -->
+                <div class="editor-toolbar">
+                    <div class="playback-controls">
+                        <button id="play-btn" class="btn btn-play" disabled>
+                            <span>&#9654;</span> Play Timeline
+                        </button>
+                        <button id="stop-btn" class="btn btn-stop" disabled>
+                            <span>&#9632;</span> Stop
+                        </button>
+                        <button id="pause-btn" class="btn btn-pause" disabled>
+                            <span>&#10074;&#10074;</span> Pause
+                        </button>
+                        <div class="status-display">
+                            <span class="status-label">Status:</span>
+                            <span id="execution-status" class="execution-status">Ready</span>
+                        </div>
+                        <div class="timer-display">
+                            <span class="timer-label">Time:</span>
+                            <span id="timer" class="timer">00:00:00</span>
+                        </div>
+                    </div>
+                    <div class="editor-controls">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="loop-checkbox">
+                            <span>Loop</span>
+                        </label>
+                        <label class="spinbox-label">
+                            <span>Loop Delay (s):</span>
+                            <input type="number" id="loop-delay" min="0" max="60" step="0.5" value="0">
+                        </label>
+                        <label class="spinbox-label">
+                            <span>Speed:</span>
+                            <input type="number" id="global-speed" min="0.1" max="4.0" step="0.1" value="1.0">
+                        </label>
+                    </div>
+                    <div class="file-controls">
+                        <button id="save-btn" class="btn btn-save">Save</button>
+                        <button id="load-btn" class="btn btn-load">Load</button>
+                        <button id="clear-btn" class="btn btn-clear">Clear</button>
+                    </div>
+                    <div class="zoom-controls">
+                        <button id="zoom-out-btn" class="btn btn-zoom"><span>&minus;</span></button>
+                        <span id="zoom-level" class="zoom-level">100%</span>
+                        <button id="zoom-in-btn" class="btn btn-zoom"><span>+</span></button>
+                        <button id="zoom-reset-btn" class="btn btn-zoom">Reset View</button>
+                    </div>
+                </div>
+
+                <!-- Node Editor Canvas -->
+                <div id="node-editor" class="node-editor"></div>
+
+                <!-- Instructions -->
+                <div class="instructions">
+                    <p><strong>Instructions:</strong> Drag recordings from sidebar onto canvas to create nodes. Click output (right dot) then input (left dot) to connect nodes into sequences. Scroll to zoom. Shift+Drag to pan. Each node has speed and delay-after controls.</p>
+                </div>
+            </main>
+        </div>
+
+        <!-- Bottom - Log Panel -->
+        <footer class="log-panel">
+            <h3>Log</h3>
+            <div id="log-output" class="log-output"></div>
+        </footer>
+    </div>
+
+    <!-- Saved Timelines Modal -->
+    <div id="timelines-modal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Saved Timelines</h3>
+                <button class="modal-close" id="modal-close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="timelines-list" class="timelines-list">
+                    <p class="waiting-message">Loading...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
