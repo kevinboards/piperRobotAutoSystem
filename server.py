@@ -98,17 +98,30 @@ def activate_can_bus(can_name: str = "can0", bitrate: int = 1000000) -> bool:
 # ---------------------------------------------------------------------------
 
 def connect_robot() -> Optional['C_PiperInterface_V2']:
-    """Connect to Piper robot. Returns interface or None."""
+    """Connect and enable the Piper robot. Returns interface or None."""
     if not SDK_AVAILABLE:
         logger.warning("Piper SDK not available - running in demo mode")
         return None
     try:
         piper = C_PiperInterface_V2()
         piper.ConnectPort()
-        logger.info("Connected to Piper robot")
+        logger.info("Connected to Piper robot (CAN port open)")
+
+        # Enable the robot arm (mirrors piper_ctrl_enable.py)
+        logger.info("Enabling Piper robot arm...")
+        max_attempts = 200
+        for attempt in range(max_attempts):
+            if piper.EnablePiper():
+                logger.info(f"Robot arm enabled (attempt {attempt + 1})")
+                break
+            time.sleep(0.01)
+        else:
+            logger.warning("EnablePiper() did not confirm success after 200 attempts — continuing anyway")
+
+        time.sleep(0.1)  # Brief settle before server accepts commands
         return piper
     except Exception as e:
-        logger.error(f"Robot connection failed: {e}")
+        logger.error(f"Robot connection/enable failed: {e}")
         return None
 
 
@@ -779,11 +792,11 @@ def main():
     else:
         print("  CAN bus: SKIPPED (demo mode)")
 
-    # Step 2: Connect to robot
-    print("\n[2/3] Connecting to Piper robot...")
+    # Step 2: Connect and enable robot
+    print("\n[2/3] Connecting and enabling Piper robot...")
     piper = connect_robot()
     if piper:
-        print("  Robot: CONNECTED")
+        print("  Robot: CONNECTED + ENABLED")
     else:
         print("  Robot: NOT CONNECTED (demo mode)")
 
