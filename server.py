@@ -830,7 +830,7 @@ class PiperServer:
 
         if WEB_DIR.exists():
             app.router.add_get("/", self._serve_index)
-            app.router.add_static("/", WEB_DIR, show_index=False)
+            app.router.add_get("/{filename:.+}", self._serve_static)
             logger.info(f"Serving static files from {WEB_DIR}")
         else:
             app.router.add_get("/", self._serve_placeholder)
@@ -842,11 +842,30 @@ class PiperServer:
         await site.start()
         logger.info(f"HTTP server listening on http://{HOST}:{HTTP_PORT}")
 
+    _NO_CACHE_HEADERS = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+
     async def _serve_index(self, request):
         index = WEB_DIR / "index.html"
         if index.exists():
-            return web.FileResponse(index)
+            resp = web.FileResponse(index)
+            resp.headers.update(self._NO_CACHE_HEADERS)
+            return resp
         return web.Response(text="Piper Automation System - web/index.html not found", status=404)
+
+    async def _serve_static(self, request):
+        """Serve static files with no-cache headers."""
+        # Strip query string cache busters (e.g. ?v=2) — path only
+        filename = request.match_info["filename"].split("?")[0]
+        filepath = WEB_DIR / filename
+        if filepath.exists() and filepath.is_file():
+            resp = web.FileResponse(filepath)
+            resp.headers.update(self._NO_CACHE_HEADERS)
+            return resp
+        return web.Response(text="Not found", status=404)
 
     async def _serve_placeholder(self, request):
         return web.Response(
