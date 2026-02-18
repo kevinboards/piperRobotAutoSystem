@@ -651,11 +651,11 @@ class PiperServer:
         # Initialize gripper
         logger.info("Initializing gripper...")
         try:
-            # Clear errors and disable
+            # Disable and clear any errors
             self.piper.GripperCtrl(0, 1000, 0x02, 0)
             time.sleep(0.1)
-            # Enable gripper
-            self.piper.GripperCtrl(0, 1000, 0x01, 0)
+            # Enable gripper and clear errors (0x03 = enable + clear errors)
+            self.piper.GripperCtrl(0, 1000, 0x03, 0)
             time.sleep(0.1)
             logger.info("Gripper initialized")
         except Exception as e:

@@ -75,12 +75,13 @@ class PiperPlayer:
             import time
             self.logger.info("Initializing gripper...")
             
-            # Clear errors and disable
+            # Disable and clear any errors
             self.piper.GripperCtrl(0, 1000, 0x02, 0)
             time.sleep(0.1)
-            
-            # Enable gripper
-            self.piper.GripperCtrl(0, 1000, 0x01, 0)
+
+            # Enable gripper and clear errors (0x03 = enable + clear errors).
+            # Using 0x01 alone would leave the gripper disabled if it had errors.
+            self.piper.GripperCtrl(0, 1000, 0x03, 0)
             time.sleep(0.1)
             
             self.logger.info("Gripper initialized successfully")
@@ -341,16 +342,19 @@ class PiperPlayer:
             gripper = data_point['gripper']
             gripper_pos = int(gripper['position'] * 1000)  # Convert mm to 0.001mm
             gripper_effort = int(gripper['effort'] * 1000)  # Convert N·m to 0.001 N·m
-            gripper_code = int(gripper['code'])
-            
+
             # Clamp gripper effort to valid range (0-5000)
             gripper_effort = max(0, min(abs(gripper_effort), 5000))
-            
-            # Send gripper command
+
+            # Always use 0x03 (enable + clear errors) during playback.
+            # The recorded 'code' field is hardcoded to 1 and is not reliable.
+            # 0x01 (enable only) leaves the gripper stuck if it has any error
+            # state. The official demo (piper_ctrl_gripper.py) always uses 0x03
+            # during active motion for this reason.
             self.piper.GripperCtrl(
                 gripper_angle=abs(gripper_pos),
                 gripper_effort=gripper_effort,
-                gripper_code=gripper_code,
+                gripper_code=0x03,
                 set_zero=0x00
             )
             
