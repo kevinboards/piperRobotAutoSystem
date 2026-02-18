@@ -59,6 +59,7 @@ class PiperPlayer:
         
         # Playback parameters
         self._speed_multiplier = DEFAULT_SPEED_MULTIPLIER
+        self._smooth_playback = False  # When True, play only every 10th recorded sample
         self._current_index = 0
         self._start_playback_time = 0
         
@@ -122,17 +123,21 @@ class PiperPlayer:
             self.logger.error(f"Failed to load recording: {e}")
             raise
     
-    def start_playback(self, speed_multiplier: float = DEFAULT_SPEED_MULTIPLIER, 
-                      init_gripper: bool = True, init_robot: bool = True) -> None:
+    def start_playback(self, speed_multiplier: float = DEFAULT_SPEED_MULTIPLIER,
+                      init_gripper: bool = True, init_robot: bool = True,
+                      smooth_playback: bool = False) -> None:
         """
         Start playing back the loaded recording.
-        
+
         Args:
             speed_multiplier: Playback speed multiplier (0.5 = half speed, 2.0 = double speed)
             init_gripper: If True, initializes gripper before playback (recommended)
             init_robot: If True, enables robot and sets slave mode before playback.
                        Set to False if robot is already prepared (e.g., playing multiple recordings).
-            
+            smooth_playback: If True, only every 10th recorded sample is sent to the robot.
+                            This reduces CAN bus traffic and produces smoother motion when the
+                            recording was captured at a high sample rate (200 Hz default).
+
         Raises:
             RuntimeError: If no recording is loaded or already playing
         """
@@ -172,13 +177,17 @@ class PiperPlayer:
                 raise RuntimeError("Failed to prepare robot for playback. Is it connected and enabled?")
         
         self._speed_multiplier = speed_multiplier
+        self._smooth_playback = smooth_playback
         self._current_index = 0
         self._stop_event.clear()
         self._pause_event.clear()
         self._is_playing = True
         self._is_paused = False
-        
-        self.logger.info(f"Starting playback at {speed_multiplier}x speed")
+
+        self.logger.info(
+            f"Starting playback at {speed_multiplier}x speed"
+            + (" [SmoothPlayback: every 10th sample]" if smooth_playback else "")
+        )
         
         # Start playback thread
         self._playback_thread = threading.Thread(target=self._playback_loop, daemon=True)
@@ -230,36 +239,61 @@ class PiperPlayer:
         Sends recorded positions to robot at fixed rate (like the demos).
         """
         self.logger.info("Playback loop started")
-        
+
         if not self._data_list:
             self.logger.error("No data to play back")
             return
-        
+
         # Use fixed rate like demos (0.005 seconds = 200 Hz)
         # Adjust by speed multiplier
         base_interval = 0.005  # 5ms between commands (like demo)
         interval = base_interval / self._speed_multiplier
-        
+
         self.logger.info(f"Playback interval: {interval*1000:.2f}ms ({1/interval:.1f} Hz)")
-        
+
+        # Set motion control mode ONCE before the loop starts.
+        # Sending MotionCtrl_2 on every frame was clobbering the gripper
+        # channel between JointCtrl and GripperCtrl calls.
         try:
-            for i, data_point in enumerate(self._data_list):
+            self.piper.MotionCtrl_2(
+                ctrl_mode=0x01,  # CAN control
+                move_mode=0x01,  # MOVE J (joint mode)
+                move_spd_rate_ctrl=100,  # 100% speed for accurate playback
+                is_mit_mode=0x00  # Normal mode
+            )
+            self.logger.info("Motion control mode set (MOVE_J, CAN, 100% speed)")
+        except Exception as e:
+            self.logger.error(f"Failed to set motion control mode: {e}")
+            return
+
+        # Build the frame list, applying smooth-playback decimation if requested
+        if self._smooth_playback:
+            frame_list = list(enumerate(self._data_list))[::10]
+            self.logger.info(
+                f"SmoothPlayback enabled: playing every 10th sample "
+                f"({len(frame_list)} of {len(self._data_list)} frames)"
+            )
+        else:
+            frame_list = list(enumerate(self._data_list))
+
+        try:
+            for i, data_point in frame_list:
                 # Check for stop signal
                 if self._stop_event.is_set():
                     self.logger.info("Playback stopped by user")
                     break
-                
+
                 # Handle pause
                 while self._pause_event.is_set():
                     time.sleep(0.1)
                     if self._stop_event.is_set():
                         break
-                
+
                 self._current_index = i
-                
+
                 # Send position command to robot
                 self._send_position(data_point)
-                
+
                 # Fixed delay between commands (like the demo)
                 time.sleep(interval)
             
@@ -275,19 +309,16 @@ class PiperPlayer:
     def _send_position(self, data_point: Dict[str, Any]) -> None:
         """
         Send a position command to the robot.
-        
+
+        MotionCtrl_2 is intentionally NOT called here — it is set once
+        before the playback loop begins. Calling it per-frame was
+        clobbering the gripper CAN channel between JointCtrl and
+        GripperCtrl, causing the gripper to be unresponsive during playback.
+
         Args:
             data_point: Dictionary with cartesian, joints, and gripper data
         """
         try:
-            # CRITICAL: Set motion control mode before EVERY command (as shown in demo)
-            self.piper.MotionCtrl_2(
-                ctrl_mode=0x01,  # CAN control
-                move_mode=0x01,  # MOVE J (joint mode)
-                move_spd_rate_ctrl=100,  # 100% speed for accurate playback
-                is_mit_mode=0x00  # Normal mode
-            )
-            
             # Extract joint angles
             joints = data_point['joints']
             
