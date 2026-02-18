@@ -23,6 +23,13 @@ from ppr_file_handler import read_ppr_file, get_recording_info
 DEFAULT_SPEED_MULTIPLIER = 1.0
 COMMAND_INTERVAL = 0.005  # 5ms = 200 Hz
 
+# Gripper effort sent during playback (SDK units: 0.001 N·m).
+# The recorded 'effort' field is the *measured* torque from feedback — it reads
+# near-zero when the gripper moves freely and cannot be used as a torque limit.
+# GripperCtrl expects a torque *limit* (max force the gripper will apply).
+# 1000 = 1.0 N·m, matching the official piper_ctrl_gripper.py demo default.
+GRIPPER_PLAYBACK_EFFORT = 1000
+
 
 class PiperPlayer:
     """
@@ -338,23 +345,19 @@ class PiperPlayer:
             # Send joint control command
             self.piper.JointCtrl(j1, j2, j3, j4, j5, j6)
             
-            # Extract gripper data
+            # Extract gripper position from the recording.
             gripper = data_point['gripper']
-            gripper_pos = int(gripper['position'] * 1000)  # Convert mm to 0.001mm
-            gripper_effort = int(gripper['effort'] * 1000)  # Convert N·m to 0.001 N·m
+            gripper_pos = int(gripper['position'] * 1000)  # mm -> 0.001 mm (SDK units)
 
-            # Clamp gripper effort to valid range (0-5000)
-            gripper_effort = max(0, min(abs(gripper_effort), 5000))
-
-            # Always use 0x03 (enable + clear errors) during playback.
-            # The recorded 'code' field is hardcoded to 1 and is not reliable.
-            # 0x01 (enable only) leaves the gripper stuck if it has any error
-            # state. The official demo (piper_ctrl_gripper.py) always uses 0x03
-            # during active motion for this reason.
+            # Use a fixed torque limit, NOT the recorded effort value.
+            # The recorded effort is *measured* torque feedback (near-zero when
+            # moving freely). GripperCtrl takes a torque *limit* instead — using
+            # the measured value as a limit would leave the gripper unable to move.
+            # GRIPPER_PLAYBACK_EFFORT = 1000 (1.0 N·m), matching the SDK demo.
             self.piper.GripperCtrl(
                 gripper_angle=abs(gripper_pos),
-                gripper_effort=gripper_effort,
-                gripper_code=0x03,
+                gripper_effort=GRIPPER_PLAYBACK_EFFORT,
+                gripper_code=0x03,  # enable + clear errors
                 set_zero=0x00
             )
             
